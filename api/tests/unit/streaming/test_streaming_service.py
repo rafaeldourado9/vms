@@ -59,11 +59,23 @@ class TestStreamingService:
         result = await svc.on_stream_stopped("tenant-t1/cam-c1")
         assert result is None
 
-    async def test_verify_publish_token_valid(self, svc):
-        """Path válido + token não-vazio = permitido."""
-        result = await svc.verify_publish_token(
-            "tenant-t1/cam-c1", "some-token"
+    async def test_verify_publish_token_valid(self, repo):
+        """Stream key correta de câmera RTMP push = permitido."""
+        from vms.cameras.domain import Camera, CameraManufacturer, StreamProtocol
+
+        camera = Camera(
+            id="c1",
+            tenant_id="t1",
+            name="Cam",
+            manufacturer=CameraManufacturer.GENERIC,
+            stream_protocol=StreamProtocol.RTMP_PUSH,
+            rtmp_stream_key="correct-stream-key",
         )
+        camera_repo = AsyncMock()
+        camera_repo.get_by_id = AsyncMock(return_value=camera)
+        svc = StreamingService(repo, camera_repo=camera_repo)
+
+        result = await svc.verify_publish_token("tenant-t1/cam-c1", "correct-stream-key")
         assert result is True
 
     async def test_verify_publish_token_empty_token(self, svc):

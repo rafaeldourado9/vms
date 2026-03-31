@@ -95,3 +95,11 @@ class ClipListResponse(BaseModel):
         """Constrói resposta calculando total de páginas."""
         pages = math.ceil(total / page_size) if page_size > 0 else 0
         return cls(items=items, total=total, page=page, page_size=page_size, pages=pages)
+
+
+class TimelineHourResponse(BaseModel):
+    """Agrupamento de segmentos por hora para UI de playback."""
+
+    hour: datetime
+    segments: list[RecordingSegmentResponse]
+    coverage_pct: float

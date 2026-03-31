@@ -7,7 +7,7 @@ from typing import Protocol
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from vms.cameras.domain import Agent, AgentStatus, Camera, CameraManufacturer
+from vms.cameras.domain import Agent, AgentStatus, Camera, CameraManufacturer, StreamProtocol
 from vms.cameras.models import AgentModel, CameraModel
 
 
@@ -43,7 +43,12 @@ def _camera_to_domain(m: CameraModel) -> Camera:
         id=m.id,
         tenant_id=m.tenant_id,
         name=m.name,
+        stream_protocol=StreamProtocol(m.stream_protocol),
         rtsp_url=m.rtsp_url,
+        rtmp_stream_key=m.rtmp_stream_key,
+        onvif_url=m.onvif_url,
+        onvif_username=m.onvif_username,
+        onvif_password=m.onvif_password,
         manufacturer=CameraManufacturer(m.manufacturer),
         location=m.location,
         agent_id=m.agent_id,
@@ -116,7 +121,12 @@ class CameraRepository:
             id=camera.id,
             tenant_id=camera.tenant_id,
             name=camera.name,
+            stream_protocol=camera.stream_protocol.value,
             rtsp_url=camera.rtsp_url,
+            rtmp_stream_key=camera.rtmp_stream_key,
+            onvif_url=camera.onvif_url,
+            onvif_username=camera.onvif_username,
+            onvif_password=camera.onvif_password,
             manufacturer=camera.manufacturer.value,
             location=camera.location,
             agent_id=camera.agent_id,
@@ -140,6 +150,10 @@ class CameraRepository:
             .values(
                 name=camera.name,
                 rtsp_url=camera.rtsp_url,
+                rtmp_stream_key=camera.rtmp_stream_key,
+                onvif_url=camera.onvif_url,
+                onvif_username=camera.onvif_username,
+                onvif_password=camera.onvif_password,
                 manufacturer=camera.manufacturer.value,
                 location=camera.location,
                 agent_id=camera.agent_id,

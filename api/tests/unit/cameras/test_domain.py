@@ -7,6 +7,7 @@ from vms.cameras.domain import (
     Camera,
     CameraConfig,
     CameraManufacturer,
+    StreamProtocol,
 )
 
 
@@ -99,3 +100,41 @@ class TestEnums:
         assert AgentStatus.PENDING == "pending"
         assert AgentStatus.ONLINE == "online"
         assert AgentStatus.OFFLINE == "offline"
+
+    def test_stream_protocols(self):
+        assert StreamProtocol.RTSP_PULL == "rtsp_pull"
+        assert StreamProtocol.RTMP_PUSH == "rtmp_push"
+        assert StreamProtocol.ONVIF == "onvif"
+
+
+class TestRtmpPushCamera:
+    """Testes de câmera RTMP push."""
+
+    def test_generate_stream_key(self):
+        key = Camera.generate_stream_key()
+        assert len(key) > 20
+        assert isinstance(key, str)
+
+    def test_rtmp_push_defaults(self):
+        camera = Camera(
+            id="c1", tenant_id="t1", name="RTMP Cam",
+            manufacturer=CameraManufacturer.GENERIC,
+            stream_protocol=StreamProtocol.RTMP_PUSH,
+            rtmp_stream_key="abc123",
+        )
+        assert camera.rtsp_url is None
+        assert camera.agent_id is None
+        assert camera.rtmp_stream_key == "abc123"
+
+    def test_onvif_camera_fields(self):
+        camera = Camera(
+            id="c2", tenant_id="t1", name="ONVIF Cam",
+            manufacturer=CameraManufacturer.HIKVISION,
+            stream_protocol=StreamProtocol.ONVIF,
+            onvif_url="http://192.168.1.10/onvif/device_service",
+            onvif_username="admin",
+            onvif_password="secret",
+            rtsp_url="rtsp://192.168.1.10:554/Streaming/Channels/1",
+        )
+        assert camera.onvif_url is not None
+        assert camera.rtsp_url is not None

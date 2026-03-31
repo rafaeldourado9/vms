@@ -6,9 +6,11 @@ from urllib.parse import parse_qs
 
 from fastapi import APIRouter, HTTPException, status
 
+from vms.cameras.repository import CameraRepository
 from vms.core.deps import DbSession
+from vms.iam.repository import ApiKeyRepository
 from vms.streaming.repository import StreamSessionRepository
-from vms.streaming.schemas import PublishAuthRequest, PublishAuthResponse
+from vms.streaming.schemas import PublishAuthRequest, PublishAuthResponse, ReadAuthRequest
 from vms.streaming.service import StreamingService
 
 logger = logging.getLogger(__name__)
@@ -16,8 +18,12 @@ router = APIRouter()
 
 
 def _streaming_svc(db: DbSession) -> StreamingService:
-    """Constrói StreamingService com repositório."""
-    return StreamingService(StreamSessionRepository(db))
+    """Constrói StreamingService com repositórios de auth."""
+    return StreamingService(
+        StreamSessionRepository(db),
+        camera_repo=CameraRepository(db),
+        api_key_repo=ApiKeyRepository(db),
+    )
 
 
 @router.post(
@@ -30,7 +36,7 @@ async def publish_auth(body: PublishAuthRequest, db: DbSession) -> PublishAuthRe
     """
     MediaMTX chama antes de aceitar publisher.
 
-    Verifica se o path é válido e o token corresponde a um agent autorizado.
+    Valida stream key (câmeras RTMP push) ou API key (agents).
     """
     token = _extract_token(body.query)
     svc = _streaming_svc(db)
@@ -45,8 +51,33 @@ async def publish_auth(body: PublishAuthRequest, db: DbSession) -> PublishAuthRe
     return PublishAuthResponse(ok=True)
 
 
+@router.post(
+    "/streaming/read-auth",
+    response_model=PublishAuthResponse,
+    summary="Autenticação de leitura MediaMTX",
+    tags=["streaming"],
+)
+async def read_auth(body: ReadAuthRequest, db: DbSession) -> PublishAuthResponse:
+    """
+    MediaMTX chama antes de aceitar viewer (HLS/WebRTC).
+
+    Valida ViewerToken JWT com claims camera_id e tenant_id.
+    """
+    token = _extract_token(body.query)
+    svc = _streaming_svc(db)
+    allowed = await svc.verify_viewer_token(token, body.path)
+
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Visualização não autorizada",
+        )
+
+    return PublishAuthResponse(ok=True)
+
+
 def _extract_token(query: str) -> str:
-    """Extrai token da query string do MediaMTX."""
+    """Extrai token da query string do MediaMTX (suporta ?token= e ?key=)."""
     params = parse_qs(query)
-    tokens = params.get("token", [])
-    return tokens[0] if tokens else ""
+    values = params.get("token") or params.get("key") or []
+    return values[0] if values else ""

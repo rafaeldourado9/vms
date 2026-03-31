@@ -156,6 +156,11 @@ class AuthService:
         except Exception as exc:
             raise AuthenticationError("Token de refresh inválido") from exc
 
+    async def issue_viewer_token(self, tenant_id: str, camera_id: str) -> str:
+        """Emite token JWT de curta duração para um viewer de stream."""
+        from vms.core.security import create_viewer_token
+        return create_viewer_token(tenant_id, camera_id)
+
     async def authenticate_api_key(self, plain_key: str) -> ApiKey:
         """
         Autentica API key e retorna entidade.

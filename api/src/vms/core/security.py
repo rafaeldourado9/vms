@@ -69,6 +69,22 @@ def create_refresh_token(subject: str, tenant_id: str) -> str:
     return jwt.encode(payload, settings.secret_key, algorithm=_ALGORITHM)
 
 
+def create_viewer_token(tenant_id: str, camera_id: str) -> str:
+    """Emite token JWT de curta duração para viewer de stream."""
+    settings = get_settings()
+
+    payload = {
+        "sub": camera_id,
+        "tenant_id": tenant_id,
+        "camera_id": camera_id,
+        "type": "viewer",
+        "exp": datetime.now(UTC) + timedelta(minutes=settings.access_token_expire_minutes),
+        "iat": datetime.now(UTC),
+        "jti": str(uuid.uuid4()),
+    }
+    return jwt.encode(payload, settings.secret_key, algorithm=_ALGORITHM)
+
+
 def decode_token(token: str) -> dict:
     """Decodifica e valida JWT. Lança JWTError se inválido."""
     settings = get_settings()

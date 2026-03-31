@@ -2,12 +2,21 @@
 from __future__ import annotations
 
 import uuid
+from datetime import UTC, datetime, timedelta
 
-from vms.cameras.domain import Agent, Camera, CameraConfig, CameraManufacturer
+from vms.cameras.domain import (
+    Agent,
+    Camera,
+    CameraConfig,
+    CameraManufacturer,
+    OnvifProbeResult,
+    StreamProtocol,
+    StreamUrls,
+)
 from vms.cameras.mediamtx import MediaMTXClient
 from vms.cameras.repository import AgentRepositoryPort, CameraRepositoryPort
 from vms.core.config import get_settings
-from vms.core.exceptions import NotFoundError
+from vms.core.exceptions import NotFoundError, ValidationError
 from vms.iam.domain import ApiKeyOwnerType
 from vms.iam.service import ApiKeyService
 
@@ -27,19 +36,46 @@ class CameraService:
         self,
         tenant_id: str,
         name: str,
-        rtsp_url: str,
         manufacturer: str = "generic",
         location: str | None = None,
         retention_days: int = 7,
+        stream_protocol: StreamProtocol = StreamProtocol.RTSP_PULL,
+        rtsp_url: str | None = None,
         agent_id: str | None = None,
+        onvif_url: str | None = None,
+        onvif_username: str | None = None,
+        onvif_password: str | None = None,
     ) -> Camera:
-        """Cria câmera, registra path no MediaMTX e persiste no banco."""
+        """Cria câmera de acordo com o protocolo e registra no MediaMTX."""
+        rtmp_stream_key: str | None = None
+
+        if stream_protocol == StreamProtocol.RTMP_PUSH:
+            rtmp_stream_key = Camera.generate_stream_key()
+            agent_id = None  # rtmp_push não usa agent
+
+        elif stream_protocol == StreamProtocol.ONVIF:
+            if not onvif_url:
+                raise ValidationError("onvif_url é obrigatório para protocolo ONVIF")
+            # Se rtsp_url não foi fornecida, tenta extrair via probe
+            if not rtsp_url:
+                from vms.cameras.onvif_client import OnvifClient
+                probe = await OnvifClient.probe(onvif_url, onvif_username or "", onvif_password or "")
+                if probe.reachable and probe.rtsp_url:
+                    rtsp_url = probe.rtsp_url
+                    if probe.manufacturer and probe.manufacturer != "unknown":
+                        manufacturer = probe.manufacturer.lower()
+
         camera = Camera(
             id=str(uuid.uuid4()),
             tenant_id=tenant_id,
             name=name,
-            rtsp_url=rtsp_url,
             manufacturer=CameraManufacturer(manufacturer),
+            stream_protocol=stream_protocol,
+            rtsp_url=rtsp_url,
+            rtmp_stream_key=rtmp_stream_key,
+            onvif_url=onvif_url,
+            onvif_username=onvif_username,
+            onvif_password=onvif_password,
             location=location,
             retention_days=retention_days,
             agent_id=agent_id,
@@ -67,6 +103,9 @@ class CameraService:
         tenant_id: str,
         name: str | None = None,
         rtsp_url: str | None = None,
+        onvif_url: str | None = None,
+        onvif_username: str | None = None,
+        onvif_password: str | None = None,
         manufacturer: str | None = None,
         location: str | None = None,
         retention_days: int | None = None,
@@ -79,6 +118,12 @@ class CameraService:
             camera.name = name
         if rtsp_url is not None:
             camera.rtsp_url = rtsp_url
+        if onvif_url is not None:
+            camera.onvif_url = onvif_url
+        if onvif_username is not None:
+            camera.onvif_username = onvif_username
+        if onvif_password is not None:
+            camera.onvif_password = onvif_password
         if manufacturer is not None:
             camera.manufacturer = CameraManufacturer(manufacturer)
         if location is not None:
@@ -96,6 +141,33 @@ class CameraService:
         camera = await self.get_camera(camera_id, tenant_id)
         await self._mediamtx.remove_path(camera.mediamtx_path)
         await self._cameras.delete(camera_id, tenant_id)
+
+    async def get_stream_urls(
+        self, camera_id: str, tenant_id: str, viewer_token: str, mediamtx_host: str
+    ) -> StreamUrls:
+        """Gera URLs de streaming assinadas para um viewer."""
+        camera = await self.get_camera(camera_id, tenant_id)
+        settings = get_settings()
+        path = camera.mediamtx_path
+
+        return StreamUrls(
+            hls_url=f"http://{mediamtx_host}:8888/{path}/index.m3u8?token={viewer_token}",
+            webrtc_url=f"http://{mediamtx_host}:8889/{path}/whep?token={viewer_token}",
+            rtsp_url=(
+                f"rtsp://{mediamtx_host}:8554/{path}?token={viewer_token}"
+                if camera.stream_protocol != StreamProtocol.RTMP_PUSH
+                else None
+            ),
+            token=viewer_token,
+            expires_at=datetime.now(UTC) + timedelta(minutes=settings.access_token_expire_minutes),
+        )
+
+    async def onvif_probe(
+        self, onvif_url: str, username: str, password: str
+    ) -> OnvifProbeResult:
+        """Faz probe ONVIF e retorna capacidades da câmera."""
+        from vms.cameras.onvif_client import OnvifClient
+        return await OnvifClient.probe(onvif_url, username, password)
 
 
 class AgentService:
@@ -146,7 +218,7 @@ class AgentService:
     async def get_agent_config(
         self, agent_id: str, tenant_id: str
     ) -> tuple[Agent, list[CameraConfig]]:
-        """Retorna agent e lista de configurações de câmera para o agent."""
+        """Retorna agent e lista de configurações de câmera para o agent (somente rtsp_pull)."""
         agent = await self.get_agent(agent_id, tenant_id)
         cameras = await self._cameras.list_by_agent(agent_id, tenant_id)
         settings = get_settings()
@@ -154,13 +226,15 @@ class AgentService:
             CameraConfig(
                 id=cam.id,
                 name=cam.name,
-                rtsp_url=cam.rtsp_url,
+                rtsp_url=cam.rtsp_url or "",
                 rtmp_push_url=(
                     f"{settings.mediamtx_rtmp_url}/{cam.mediamtx_path}"
                 ),
                 enabled=cam.is_active,
             )
             for cam in cameras
+            if cam.stream_protocol in (StreamProtocol.RTSP_PULL, StreamProtocol.ONVIF)
+            and cam.rtsp_url
         ]
         return agent, configs
 

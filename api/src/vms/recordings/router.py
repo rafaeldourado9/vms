@@ -1,19 +1,19 @@
 """Rotas HTTP do bounded context de gravações."""
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone, timedelta
 
-from fastapi import APIRouter, Query, status
+from fastapi import APIRouter, HTTPException, Query, status
 
 from vms.core.deps import CurrentUser, DbSession
-from vms.core.exceptions import NotFoundError
 from vms.recordings.repository import ClipRepository, RecordingSegmentRepository
 from vms.recordings.schemas import (
     ClipListResponse,
     ClipResponse,
     CreateClipRequest,
-    SegmentListResponse,
     RecordingSegmentResponse,
+    SegmentListResponse,
+    TimelineHourResponse,
 )
 from vms.recordings.service import RecordingService
 
@@ -60,6 +60,58 @@ async def list_recordings(
     return SegmentListResponse.build(items, total, page, page_size)
 
 
+@router.get(
+    "/cameras/{camera_id}/timeline",
+    response_model=list[TimelineHourResponse],
+    summary="Timeline de gravações por hora",
+    tags=["recordings"],
+)
+async def get_timeline(
+    camera_id: str,
+    claims: CurrentUser,
+    db: DbSession,
+    started_after: datetime | None = Query(default=None),
+    started_before: datetime | None = Query(default=None),
+) -> list[TimelineHourResponse]:
+    """
+    Retorna segmentos agrupados por hora para UI de playback.
+
+    Calcula cobertura (coverage_pct) por hora baseado na duração dos segmentos.
+    """
+    svc = _recording_svc(db)
+    segments, _ = await svc._segments.list_by_camera(
+        tenant_id=claims.tenant_id,
+        camera_id=camera_id,
+        started_after=started_after,
+        started_before=started_before,
+        limit=10000,
+        offset=0,
+    )
+
+    # Agrupa por hora
+    hours: dict[datetime, list] = {}
+    for seg in segments:
+        started = seg.started_at
+        if started.tzinfo is None:
+            started = started.replace(tzinfo=timezone.utc)
+        hour_key = started.replace(minute=0, second=0, microsecond=0)
+        hours.setdefault(hour_key, []).append(seg)
+
+    result = []
+    for hour_dt, hour_segs in sorted(hours.items()):
+        total_duration = sum(s.duration_seconds for s in hour_segs)
+        coverage_pct = min(total_duration / 3600.0, 1.0)
+        result.append(
+            TimelineHourResponse(
+                hour=hour_dt,
+                segments=[RecordingSegmentResponse.model_validate(s) for s in hour_segs],
+                coverage_pct=round(coverage_pct, 4),
+            )
+        )
+
+    return result
+
+
 # ─── Clipes ───────────────────────────────────────────────────────────────────
 
 @router.get(
@@ -86,6 +138,25 @@ async def list_clips(
     )
     items = [ClipResponse.model_validate(c) for c in clips]
     return ClipListResponse.build(items, total, page, page_size)
+
+
+@router.get(
+    "/recordings/clips/{clip_id}",
+    response_model=ClipResponse,
+    summary="Status do clipe",
+    tags=["recordings"],
+)
+async def get_clip(
+    clip_id: str,
+    claims: CurrentUser,
+    db: DbSession,
+) -> ClipResponse:
+    """Retorna status do clipe (polling para UI saber quando ficou pronto)."""
+    svc = _recording_svc(db)
+    clip = await svc._clips.get_by_id(clip_id, claims.tenant_id)
+    if not clip:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Clipe não encontrado")
+    return ClipResponse.model_validate(clip)
 
 
 @router.post(

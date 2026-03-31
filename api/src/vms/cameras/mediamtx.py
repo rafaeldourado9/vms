@@ -16,10 +16,17 @@ class MediaMTXClient:
     def __init__(self, base_url: str | None = None) -> None:
         self._base_url = base_url or get_settings().mediamtx_api_url
 
-    async def add_path(self, path: str) -> bool:
-        """Adiciona path de stream no MediaMTX. Retorna True se OK."""
+    async def add_path(self, path: str, source_url: str = "") -> bool:
+        """
+        Adiciona path de stream no MediaMTX. Retorna True se OK.
+
+        - source_url vazio: MediaMTX aceita qualquer publisher (RTMP push / câmeras ativas)
+        - source_url preenchido: MediaMTX faz pull do RTSP (modo agent)
+        """
         url = f"{self._base_url}/v3/config/paths/add/{path}"
-        body = {"name": path, "source": "", "record": True}
+        body: dict = {"name": path, "record": True}
+        if source_url:
+            body["source"] = source_url
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.post(url, json=body)

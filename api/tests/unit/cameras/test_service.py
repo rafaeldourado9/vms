@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from vms.cameras.domain import Agent, AgentStatus, Camera, CameraConfig, CameraManufacturer
+from vms.cameras.domain import Agent, AgentStatus, Camera, CameraConfig, CameraManufacturer, StreamProtocol
 from vms.cameras.service import AgentService, CameraService
 from vms.core.exceptions import NotFoundError
 from vms.iam.domain import ApiKey, ApiKeyOwnerType
@@ -37,7 +37,14 @@ class TestCameraService:
 
     async def test_create_camera(self, svc, camera_repo, mediamtx):
         """Criar câmera persiste e registra no MediaMTX."""
-        cam = await svc.create_camera("t1", "Cam 1", "rtsp://x")
+        from vms.cameras.domain import StreamProtocol
+        cam = await svc.create_camera(
+            tenant_id="t1",
+            name="Cam 1",
+            stream_protocol=StreamProtocol.RTSP_PULL,
+            rtsp_url="rtsp://x",
+            agent_id="a1",
+        )
         assert cam.name == "Cam 1"
         camera_repo.create.assert_called_once()
         mediamtx.add_path.assert_called_once()
@@ -142,6 +149,7 @@ class TestAgentService:
         camera_repo.list_by_agent.return_value = [
             Camera(
                 id="c1", tenant_id="t1", name="Cam",
+                stream_protocol=StreamProtocol.RTSP_PULL,
                 rtsp_url="rtsp://x", manufacturer=CameraManufacturer.GENERIC,
                 agent_id="a1",
             ),

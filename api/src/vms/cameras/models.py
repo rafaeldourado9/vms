@@ -64,7 +64,14 @@ class CameraModel(Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     location: Mapped[str | None] = mapped_column(String(500), nullable=True)
-    rtsp_url: Mapped[str] = mapped_column(String(2000), nullable=False)
+    stream_protocol: Mapped[str] = mapped_column(
+        String(50), nullable=False, default="rtsp_pull"
+    )
+    rtsp_url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    rtmp_stream_key: Mapped[str | None] = mapped_column(String(100), nullable=True, unique=True)
+    onvif_url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    onvif_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    onvif_password: Mapped[str | None] = mapped_column(String(500), nullable=True)
     manufacturer: Mapped[str] = mapped_column(String(50), nullable=False, default="generic")
     retention_days: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)

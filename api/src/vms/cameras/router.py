@@ -1,7 +1,9 @@
 """Rotas HTTP do bounded context de câmeras e agents."""
 from __future__ import annotations
 
-from fastapi import APIRouter, HTTPException, status
+import time
+
+from fastapi import APIRouter, HTTPException, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vms.cameras.repository import AgentRepository, CameraRepository
@@ -13,7 +15,14 @@ from vms.cameras.schemas import (
     CreateAgentRequest,
     CreateAgentResponse,
     CreateCameraRequest,
+    DiscoverOnvifRequest,
+    DiscoverOnvifResponse,
+    DiscoveredCamera,
     HeartbeatRequest,
+    OnvifProbeRequest,
+    OnvifProbeResponse,
+    RtmpConfigResponse,
+    StreamUrlsResponse,
     UpdateCameraRequest,
 )
 from vms.cameras.service import AgentService, CameraService
@@ -71,16 +80,20 @@ async def create_camera(
     claims: CurrentUser,
     db: DbSession,
 ) -> CameraResponse:
-    """Cria câmera e registra path no MediaMTX."""
+    """Cria câmera (rtsp_pull, rtmp_push ou onvif) e registra path no MediaMTX."""
     svc = _camera_svc(db)
     camera = await svc.create_camera(
         tenant_id=claims.tenant_id,
         name=body.name,
-        rtsp_url=body.rtsp_url,
         manufacturer=body.manufacturer,
         location=body.location,
         retention_days=body.retention_days,
+        stream_protocol=body.stream_protocol,
+        rtsp_url=body.rtsp_url,
         agent_id=body.agent_id,
+        onvif_url=body.onvif_url,
+        onvif_username=body.onvif_username,
+        onvif_password=body.onvif_password,
     )
     return CameraResponse.model_validate(camera)
 
@@ -121,6 +134,9 @@ async def update_camera(
         tenant_id=claims.tenant_id,
         name=body.name,
         rtsp_url=body.rtsp_url,
+        onvif_url=body.onvif_url,
+        onvif_username=body.onvif_username,
+        onvif_password=body.onvif_password,
         manufacturer=body.manufacturer,
         location=body.location,
         retention_days=body.retention_days,
@@ -144,6 +160,131 @@ async def delete_camera(
     """Remove câmera e seu path no MediaMTX (best-effort)."""
     svc = _camera_svc(db)
     await svc.delete_camera(camera_id, claims.tenant_id)
+
+
+@router.get(
+    "/cameras/{camera_id}/stream-urls",
+    response_model=StreamUrlsResponse,
+    summary="URLs de streaming",
+    tags=["cameras"],
+)
+async def get_stream_urls(
+    camera_id: str,
+    claims: CurrentUser,
+    db: DbSession,
+    request: Request,
+) -> StreamUrlsResponse:
+    """Retorna URLs HLS/WebRTC assinadas para um viewer."""
+    from vms.iam.service import AuthService
+    from vms.iam.repository import ApiKeyRepository as IamRepo
+
+    # Gera viewer token via AuthService
+    auth_svc = AuthService(user_repo=None, api_key_repo=IamRepo(db))  # type: ignore[arg-type]
+    viewer_token = await auth_svc.issue_viewer_token(
+        tenant_id=claims.tenant_id, camera_id=camera_id
+    )
+
+    svc = _camera_svc(db)
+    mediamtx_host = request.headers.get("X-MediaMTX-Host", "localhost")
+    urls = await svc.get_stream_urls(camera_id, claims.tenant_id, viewer_token, mediamtx_host)
+    return StreamUrlsResponse(
+        hls_url=urls.hls_url,
+        webrtc_url=urls.webrtc_url,
+        rtsp_url=urls.rtsp_url,
+        token=urls.token,
+        expires_at=urls.expires_at,
+    )
+
+
+@router.get(
+    "/cameras/{camera_id}/rtmp-config",
+    response_model=RtmpConfigResponse,
+    summary="Configuração RTMP da câmera",
+    tags=["cameras"],
+)
+async def get_rtmp_config(
+    camera_id: str,
+    claims: CurrentUser,
+    db: DbSession,
+    request: Request,
+) -> RtmpConfigResponse:
+    """Retorna URL RTMP e stream key para câmeras com stream_protocol=rtmp_push."""
+    from vms.core.exceptions import NotFoundError
+
+    svc = _camera_svc(db)
+    camera = await svc.get_camera(camera_id, claims.tenant_id)
+
+    if camera.stream_protocol != "rtmp_push" or not camera.rtmp_stream_key:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Câmera não está configurada como RTMP push",
+        )
+
+    mediamtx_host = request.headers.get("X-MediaMTX-Host", "localhost")
+    rtmp_url = f"rtmp://{mediamtx_host}:1935/{camera.mediamtx_path}"
+    return RtmpConfigResponse(rtmp_url=rtmp_url, stream_key=camera.rtmp_stream_key)
+
+
+@router.get(
+    "/cameras/{camera_id}/snapshot",
+    summary="Snapshot da câmera",
+    tags=["cameras"],
+)
+async def get_snapshot(
+    camera_id: str,
+    claims: CurrentUser,
+    db: DbSession,
+) -> dict:
+    """Retorna URL de snapshot da câmera (ONVIF) ou frame via ffmpeg."""
+    from vms.cameras.snapshot import get_snapshot_url
+    svc = _camera_svc(db)
+    camera = await svc.get_camera(camera_id, claims.tenant_id)
+    url = await get_snapshot_url(camera)
+    return {"snapshot_url": url}
+
+
+@router.post(
+    "/cameras/onvif-probe",
+    response_model=OnvifProbeResponse,
+    summary="Probe ONVIF",
+    tags=["cameras"],
+)
+async def onvif_probe(
+    body: OnvifProbeRequest,
+    claims: CurrentUser,
+    db: DbSession,
+) -> OnvifProbeResponse:
+    """Faz probe ONVIF e retorna capacidades da câmera."""
+    svc = _camera_svc(db)
+    result = await svc.onvif_probe(body.onvif_url, body.username, body.password)
+    return OnvifProbeResponse(
+        reachable=result.reachable,
+        manufacturer=result.manufacturer,
+        model=result.model,
+        rtsp_url=result.rtsp_url,
+        snapshot_url=result.snapshot_url,
+        error=result.error,
+    )
+
+
+@router.post(
+    "/cameras/discover",
+    response_model=DiscoverOnvifResponse,
+    summary="Descobrir câmeras ONVIF na rede",
+    tags=["cameras"],
+)
+async def discover_cameras(
+    body: DiscoverOnvifRequest,
+    claims: CurrentUser,
+    db: DbSession,
+) -> DiscoverOnvifResponse:
+    """WS-Discovery de câmeras ONVIF na rede local."""
+    from vms.cameras.onvif_client import OnvifClient
+    start = time.monotonic()
+    raw = await OnvifClient.discover(timeout_seconds=body.timeout_seconds)
+    duration_ms = int((time.monotonic() - start) * 1000)
+    cameras = [DiscoveredCamera(onvif_url=c["onvif_url"], ip=c["ip"]) for c in raw]
+    return DiscoverOnvifResponse(cameras=cameras, duration_ms=duration_ms)
 
 
 # ─── Agents ───────────────────────────────────────────────────────────────────

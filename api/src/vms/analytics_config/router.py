@@ -10,7 +10,9 @@ from fastapi import APIRouter, Header, HTTPException, status
 from vms.analytics_config.repository import ROIRepository
 from vms.analytics_config.schemas import (
     AnalyticsIngestRequest,
+    AnalyticsSummaryResponse,
     CreateROIRequest,
+    ROIEventSummary,
     ROIForAnalytics,
     ROIResponse,
     UpdateROIRequest,
@@ -140,6 +142,111 @@ async def delete_roi(
 ) -> None:
     """Remove ROI permanentemente."""
     await _svc(db).delete_roi(roi_id, claims.tenant_id)
+
+
+@router.get(
+    "/analytics/rois/{roi_id}/events",
+    summary="Eventos gerados por esta ROI",
+    tags=["analytics-config"],
+)
+async def get_roi_events(
+    roi_id: str,
+    claims: CurrentUser,
+    db: DbSession,
+    started_after: datetime | None = None,
+    started_before: datetime | None = None,
+    page: int = 1,
+    page_size: int = 50,
+) -> dict:
+    """Lista eventos VmsEvent gerados por uma ROI específica (filtrado por roi_id no payload)."""
+    from sqlalchemy import func, select
+    from vms.events.models import VmsEventModel
+
+    offset = (page - 1) * page_size
+    base = select(VmsEventModel).where(
+        VmsEventModel.tenant_id == claims.tenant_id,
+        VmsEventModel.payload["roi_id"].as_string() == roi_id,
+    )
+    if started_after:
+        base = base.where(VmsEventModel.occurred_at >= started_after)
+    if started_before:
+        base = base.where(VmsEventModel.occurred_at <= started_before)
+
+    count_stmt = select(func.count()).select_from(base.subquery())
+    total = await db.scalar(count_stmt) or 0
+
+    stmt = base.order_by(VmsEventModel.occurred_at.desc()).limit(page_size).offset(offset)
+    result = await db.scalars(stmt)
+    events = result.all()
+
+    return {
+        "items": [
+            {
+                "id": e.id,
+                "event_type": e.event_type,
+                "camera_id": e.camera_id,
+                "payload": e.payload,
+                "occurred_at": e.occurred_at.isoformat(),
+            }
+            for e in events
+        ],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
+@router.get(
+    "/analytics/summary",
+    response_model=AnalyticsSummaryResponse,
+    summary="Resumo agregado de analytics",
+    tags=["analytics-config"],
+)
+async def get_analytics_summary(
+    claims: CurrentUser,
+    db: DbSession,
+    started_after: datetime | None = None,
+    started_before: datetime | None = None,
+) -> AnalyticsSummaryResponse:
+    """Contagens agregadas de eventos analytics por câmera e tipo para dashboard."""
+    from datetime import timezone, timedelta
+    from sqlalchemy import func, select
+    from vms.events.models import VmsEventModel
+
+    now = datetime.now(timezone.utc)
+    period_start = started_after or (now - timedelta(hours=24))
+    period_end = started_before or now
+
+    stmt = (
+        select(
+            VmsEventModel.camera_id,
+            VmsEventModel.event_type,
+            func.count().label("cnt"),
+        )
+        .where(
+            VmsEventModel.tenant_id == claims.tenant_id,
+            VmsEventModel.event_type.like("analytics.%"),
+            VmsEventModel.occurred_at >= period_start,
+            VmsEventModel.occurred_at <= period_end,
+        )
+        .group_by(VmsEventModel.camera_id, VmsEventModel.event_type)
+    )
+
+    result = await db.execute(stmt)
+    rows = result.all()
+
+    by_type = [
+        ROIEventSummary(camera_id=row.camera_id or "", event_type=row.event_type, count=row.cnt)
+        for row in rows
+    ]
+    total = sum(r.count for r in by_type)
+
+    return AnalyticsSummaryResponse(
+        period_start=period_start,
+        period_end=period_end,
+        total_events=total,
+        by_type=by_type,
+    )
 
 
 # ─── Endpoint interno (requer Analytics API key) ──────────────────────────────

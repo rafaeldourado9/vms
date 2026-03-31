@@ -90,6 +90,23 @@ class ROIForAnalytics(BaseModel):
     config: dict
 
 
+class ROIEventSummary(BaseModel):
+    """Contagem de eventos por câmera/tipo para dashboard."""
+
+    camera_id: str
+    event_type: str
+    count: int
+
+
+class AnalyticsSummaryResponse(BaseModel):
+    """Resumo agregado de eventos analytics por período."""
+
+    period_start: datetime
+    period_end: datetime
+    total_events: int
+    by_type: list[ROIEventSummary]
+
+
 class AnalyticsIngestRequest(BaseModel):
     """Payload recebido do analytics_service com resultado de análise."""
 

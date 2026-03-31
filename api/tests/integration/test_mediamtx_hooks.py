@@ -10,8 +10,9 @@ from httpx import AsyncClient
 class TestPublishAuth:
     """POST /streaming/publish-auth — autenticação de publicação MediaMTX."""
 
-    async def test_publish_auth_valid(self, client: AsyncClient):
-        """Path válido + token aceita publicação."""
+    @patch("vms.streaming.service.StreamingService.verify_publish_token", new_callable=AsyncMock, return_value=True)
+    async def test_publish_auth_valid(self, _mock, client: AsyncClient):
+        """Path válido + token válido aceita publicação (lógica de auth mockada)."""
         resp = await client.post(
             "/streaming/publish-auth",
             json={

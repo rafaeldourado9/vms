@@ -14,6 +14,14 @@ class PublishAuthRequest(BaseModel):
     query: str = ""
 
 
+class ReadAuthRequest(BaseModel):
+    """Payload de autenticação de leitura do MediaMTX."""
+
+    action: str
+    path: str
+    query: str = ""
+
+
 class PublishAuthResponse(BaseModel):
     """Resposta de autenticação de publicação."""
 
