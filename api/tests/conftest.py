@@ -1,10 +1,14 @@
 """Fixtures compartilhadas para todos os testes."""
 from __future__ import annotations
 
+import os
 import uuid
 from datetime import UTC, datetime
 from typing import AsyncGenerator
 from unittest.mock import AsyncMock
+
+# Desabilita rate limiting nos testes
+os.environ.setdefault("ENVIRONMENT", "testing")
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -43,7 +47,7 @@ def test_settings() -> Settings:
         redis_url="redis://localhost:6379/15",
         rabbitmq_url="amqp://guest:guest@localhost:5672/",
         secret_key="test-secret-key-do-not-use-in-prod",
-        environment="development",
+        environment="testing",
     )
 
 

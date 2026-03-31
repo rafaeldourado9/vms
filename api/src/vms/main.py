@@ -9,11 +9,15 @@ import redis.asyncio as aioredis
 from fastapi import FastAPI, Request, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
 
 from vms.core.config import get_settings
 from vms.core.database import close_db, create_engine, init_db
 from vms.core.event_bus import connect_event_bus, disconnect_event_bus
 from vms.core.exceptions import register_exception_handlers
+from vms.core.logging_config import setup_logging
+from vms.core.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +26,9 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Inicializa e finaliza recursos da aplicação."""
     settings = get_settings()
+
+    # Logging estruturado
+    setup_logging()
 
     # Banco de dados
     engine = create_engine(settings.database_url)
@@ -84,6 +91,10 @@ def create_app() -> FastAPI:
 
     # Handlers de exceção de domínio
     register_exception_handlers(app)
+
+    # Rate limiting
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
     # Handler genérico para erros não tratados
     @app.exception_handler(Exception)

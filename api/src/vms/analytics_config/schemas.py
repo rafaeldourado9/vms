@@ -88,3 +88,15 @@ class ROIForAnalytics(BaseModel):
     ia_type: str
     polygon_points: list[list[float]]
     config: dict
+
+
+class AnalyticsIngestRequest(BaseModel):
+    """Payload recebido do analytics_service com resultado de análise."""
+
+    plugin: str = Field(..., description="Nome do plugin que gerou o resultado")
+    camera_id: str = Field(..., description="ID da câmera analisada")
+    tenant_id: str = Field(..., description="ID do tenant")
+    roi_id: str = Field(..., description="ID da ROI onde houve detecção")
+    event_type: str = Field(..., description="Tipo de evento: analytics.*")
+    payload: dict = Field(default_factory=dict, description="Dados específicos da detecção")
+    occurred_at: str = Field(..., description="Timestamp ISO da detecção")

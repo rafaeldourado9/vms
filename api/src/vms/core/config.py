@@ -56,7 +56,7 @@ class Settings(BaseSettings):
     @classmethod
     def validar_ambiente(cls, v: str) -> str:
         """Valida que o ambiente é um valor conhecido."""
-        ambientes_validos = {"development", "staging", "production"}
+        ambientes_validos = {"development", "staging", "production", "testing"}
         if v not in ambientes_validos:
             raise ValueError(f"Ambiente deve ser um de: {ambientes_validos}")
         return v

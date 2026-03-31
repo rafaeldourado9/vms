@@ -123,4 +123,7 @@ def bdd_client(bdd_engine, bdd_session_factory) -> SyncHttpClient:
     test_app.state.redis = AsyncMock(spec=aioredis.Redis)
     test_app.state.arq_redis = AsyncMock()
 
+    # Desabilita rate limiting nos testes BDD
+    test_app.state.limiter.enabled = False
+
     return SyncHttpClient(test_app)

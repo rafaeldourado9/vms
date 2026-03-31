@@ -1,10 +1,11 @@
 """Rotas HTTP do IAM — autenticação, tenants, usuários."""
 
-from fastapi import APIRouter, status
+from fastapi import APIRouter, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vms.core.config import get_settings
 from vms.core.deps import AdminUser, CurrentUser, DbSession
+from vms.core.rate_limit import limiter
 from vms.iam.repository import ApiKeyRepository, TenantRepository, UserRepository
 from vms.iam.schemas import (
     CreateTenantRequest,
@@ -36,7 +37,8 @@ def _make_user_service(db: AsyncSession) -> UserService:
     summary="Obter tokens JWT",
     tags=["auth"],
 )
-async def login(body: LoginRequest, db: DbSession) -> TokenResponse:
+@limiter.limit("5/minute")
+async def login(request: Request, body: LoginRequest, db: DbSession) -> TokenResponse:
     """
     Autentica usuário e retorna access + refresh tokens.
 
@@ -78,7 +80,8 @@ async def login(body: LoginRequest, db: DbSession) -> TokenResponse:
     summary="Renovar tokens JWT",
     tags=["auth"],
 )
-async def refresh_token(body: RefreshRequest, db: DbSession) -> TokenResponse:
+@limiter.limit("10/minute")
+async def refresh_token(request: Request, body: RefreshRequest, db: DbSession) -> TokenResponse:
     """Renova access + refresh tokens a partir de um refresh token válido."""
     settings = get_settings()
     svc = _make_auth_service(db)

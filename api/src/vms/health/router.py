@@ -79,3 +79,46 @@ async def health_check() -> dict:
         },
         "version": _VERSION,
     }
+
+
+@router.get("/metrics", summary="Métricas básicas", tags=["health"])
+async def metrics() -> dict:
+    """
+    Contadores básicos para monitoramento.
+
+    Consulta DB para contagens rápidas. Sem autenticação para scraping.
+    """
+    try:
+        from sqlalchemy import func, select
+        from vms.cameras.models import CameraModel
+        from vms.events.models import VmsEventModel
+        from vms.iam.models import TenantModel, UserModel
+        from vms.streaming.models import StreamSessionModel
+
+        factory = get_session_factory()
+        async with factory() as session:
+            tenants = await session.scalar(select(func.count(TenantModel.id)))
+            users = await session.scalar(select(func.count(UserModel.id)))
+            cameras = await session.scalar(select(func.count(CameraModel.id)))
+            cameras_online = await session.scalar(
+                select(func.count(CameraModel.id)).where(CameraModel.is_online.is_(True))
+            )
+            events_total = await session.scalar(select(func.count(VmsEventModel.id)))
+            active_streams = await session.scalar(
+                select(func.count(StreamSessionModel.id)).where(
+                    StreamSessionModel.ended_at.is_(None)
+                )
+            )
+
+        return {
+            "tenants": tenants or 0,
+            "users": users or 0,
+            "cameras_total": cameras or 0,
+            "cameras_online": cameras_online or 0,
+            "events_total": events_total or 0,
+            "active_streams": active_streams or 0,
+            "version": _VERSION,
+        }
+    except Exception as exc:
+        logger.warning("Metrics falhou: %s", exc)
+        return {"error": str(exc), "version": _VERSION}

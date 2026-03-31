@@ -1,10 +1,15 @@
 """Rotas HTTP do bounded context de configuração de analytics."""
 from __future__ import annotations
 
+import logging
+import uuid
+from datetime import datetime
+
 from fastapi import APIRouter, Header, HTTPException, status
 
 from vms.analytics_config.repository import ROIRepository
 from vms.analytics_config.schemas import (
+    AnalyticsIngestRequest,
     CreateROIRequest,
     ROIForAnalytics,
     ROIResponse,
@@ -13,6 +18,8 @@ from vms.analytics_config.schemas import (
 from vms.analytics_config.service import ROIService
 from vms.core.config import get_settings
 from vms.core.deps import CurrentUser, DbSession
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 internal_router = APIRouter()
@@ -186,3 +193,67 @@ async def get_camera_rois_internal(
         )
         for m in models
     ]
+
+
+@internal_router.post(
+    "/internal/analytics/ingest",
+    status_code=status.HTTP_201_CREATED,
+    summary="Ingestão de resultado de analytics — uso interno",
+    tags=["internal"],
+)
+async def ingest_analytics(
+    body: AnalyticsIngestRequest,
+    db: DbSession,
+    authorization: str | None = Header(default=None),
+) -> dict:
+    """
+    Recebe resultado de análise do analytics_service e cria VmsEvent.
+
+    Requer header Authorization: ApiKey <analytics_api_key>.
+    """
+    settings = get_settings()
+    expected = f"ApiKey {settings.analytics_api_key}"
+    if not authorization or authorization != expected:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Analytics API key inválida ou ausente",
+        )
+
+    from vms.events.models import VmsEventModel
+
+    event = VmsEventModel(
+        id=str(uuid.uuid4()),
+        tenant_id=body.tenant_id,
+        event_type=body.event_type,
+        payload=body.payload,
+        camera_id=body.camera_id,
+        occurred_at=datetime.fromisoformat(body.occurred_at),
+    )
+    db.add(event)
+    await db.commit()
+
+    # Publica no event bus para notificações
+    try:
+        from vms.core.event_bus import publish_event
+
+        await publish_event(
+            body.event_type,
+            {
+                "event_id": event.id,
+                "camera_id": body.camera_id,
+                "plugin": body.plugin,
+                "roi_id": body.roi_id,
+                **body.payload,
+            },
+            tenant_id=body.tenant_id,
+        )
+    except Exception:
+        logger.warning("Falha ao publicar evento analytics no event bus")
+
+    logger.info(
+        "Analytics ingest: plugin=%s camera=%s event=%s",
+        body.plugin,
+        body.camera_id,
+        body.event_type,
+    )
+    return {"status": "created", "event_id": event.id}

@@ -193,80 +193,80 @@
 
 ### 6.1 Edge Agent (serviço separado)
 
-- [ ] `edge_agent/pyproject.toml`
-- [ ] `edge_agent/Dockerfile`
-- [ ] `edge_agent/src/agent/config.py` — env vars
-- [ ] `edge_agent/src/agent/cloud_client.py` — HTTP client (poll config, heartbeat)
-- [ ] `edge_agent/src/agent/stream_manager.py` — ffmpeg subprocess management
-- [ ] `edge_agent/src/agent/health_checker.py` — process monitor + restart
-- [ ] `edge_agent/src/agent/main.py` — event loop principal
-- [ ] Agent Dockerfile separado
+- [x] `edge_agent/pyproject.toml`
+- [x] `edge_agent/Dockerfile`
+- [x] `edge_agent/src/agent/config.py` — env vars
+- [x] `edge_agent/src/agent/cloud_client.py` — HTTP client (poll config, heartbeat)
+- [x] `edge_agent/src/agent/stream_manager.py` — ffmpeg subprocess management
+- [x] `edge_agent/src/agent/health_checker.py` — process monitor + restart
+- [x] `edge_agent/src/agent/main.py` — event loop principal
+- [x] Agent Dockerfile separado
 
 ### 6.2 Testes Sprint 6
 
-- [ ] `edge_agent/tests/test_stream_manager.py` — start/stop/restart streams
-- [ ] `edge_agent/tests/test_cloud_client.py` — config poll, heartbeat
-- [ ] `tests/bdd/features/edge_agent.feature` + steps
+- [x] `edge_agent/tests/test_stream_manager.py` — start/stop/restart streams
+- [x] `edge_agent/tests/test_cloud_client.py` — config poll, heartbeat
+- [x] `tests/bdd/features/edge_agent.feature` + steps
 
 **Critério de aceite:** Agent sobe, faz heartbeat, inicia ffmpeg para cada câmera ativa
 
 ---
 
-## Sprint 7 — Analytics Service [2026-04-02]
+## Sprint 7 — Analytics Service [2026-04-02] ✅
 
 ### 7.1 Framework de Plugins
 
-- [ ] `analytics/src/analytics/core/plugin_base.py` — AnalyticsPlugin ABC
-- [ ] `analytics/src/analytics/core/yolo_base.py` — YOLOPlugin base
-- [ ] `analytics/src/analytics/core/orchestrator.py` — frame capture + plugin routing
-- [ ] `analytics/src/analytics/core/frame_source.py` — OpenCV RTSP reader (1fps)
-- [ ] `analytics/src/analytics/core/vms_client.py` — HTTP client para VMS API
-- [ ] `analytics/src/analytics/core/config.py` — settings
-- [ ] `analytics/src/analytics/main.py` — FastAPI app + lifespan
+- [x] `analytics/src/analytics/core/plugin_base.py` — AnalyticsPlugin ABC
+- [x] `analytics/src/analytics/core/yolo_base.py` — YOLOPlugin base
+- [x] `analytics/src/analytics/core/orchestrator.py` — frame capture + plugin routing
+- [x] `analytics/src/analytics/core/frame_source.py` — OpenCV RTSP reader (1fps)
+- [x] `analytics/src/analytics/core/vms_client.py` — HTTP client para VMS API
+- [x] `analytics/src/analytics/core/config.py` — settings
+- [x] `analytics/src/analytics/main.py` — FastAPI app + lifespan
 
 ### 7.2 Plugins Core
 
-- [ ] `analytics/src/analytics/plugins/intrusion/plugin.py` — YOLOv8n + polígono
-- [ ] `analytics/src/analytics/plugins/people_count/plugin.py` — YOLOv8n count
-- [ ] `analytics/src/analytics/plugins/vehicle_count/plugin.py` — YOLOv8n classes car/truck/moto
-- [ ] `analytics/src/analytics/plugins/lpr/plugin.py` — YOLOv8 detect + fast-plate-ocr
+- [x] `analytics/src/analytics/plugins/intrusion/plugin.py` — YOLOv8n + polígono
+- [x] `analytics/src/analytics/plugins/people_count/plugin.py` — YOLOv8n count
+- [x] `analytics/src/analytics/plugins/vehicle_count/plugin.py` — YOLOv8n classes car/truck/moto
+- [x] `analytics/src/analytics/plugins/lpr/plugin.py` — YOLOv8 detect + fast-plate-ocr
 
 ### 7.3 API interna (analytics_service)
 
-- [ ] `POST /internal/analytics/ingest/` — recebe resultado do plugin
-- [ ] `GET /internal/cameras/{id}/rois/` — ROIs ativas por câmera
-- [ ] `GET /health` — status dos plugins carregados
+- [x] `POST /internal/analytics/ingest/` — recebe resultado do plugin
+- [x] `GET /internal/cameras/{id}/rois/` — ROIs ativas por câmera
+- [x] `GET /health` — status dos plugins carregados
 
 ### 7.4 ROI Management no VMS API
 
-- [ ] `analytics_config/domain.py` — RegionOfInterest
-- [ ] `analytics_config/models.py`
-- [ ] `analytics_config/service.py` — CRUD ROIs
-- [ ] `analytics_config/router.py` — GET/POST/PATCH/DELETE /analytics/rois
+- [x] `analytics_config/domain.py` — RegionOfInterest
+- [x] `analytics_config/models.py`
+- [x] `analytics_config/service.py` — CRUD ROIs
+- [x] `analytics_config/router.py` — GET/POST/PATCH/DELETE /analytics/rois
 
 ### 7.5 Testes Sprint 7
 
-- [ ] `analytics/tests/unit/test_intrusion_plugin.py`
-- [ ] `analytics/tests/unit/test_people_count_plugin.py`
-- [ ] `analytics/tests/unit/test_lpr_plugin.py`
-- [ ] `analytics/tests/integration/test_analytics_api.py`
-- [ ] `tests/bdd/features/analytics.feature` + steps
+- [x] `analytics/tests/unit/test_intrusion_plugin.py`
+- [x] `analytics/tests/unit/test_people_count_plugin.py`
+- [x] `analytics/tests/unit/test_lpr_plugin.py`
+- [x] `analytics/tests/integration/test_analytics_api.py`
+- [x] `tests/bdd/features/analytics.feature` + steps
 
 **Critério de aceite:** Frame sintético com pessoas → people_count emite evento; LPR detecta placa em imagem de teste
 
 ---
 
-## Sprint 8 — Segurança, Observabilidade & Polish [2026-04-02]
+## Sprint 8 — Segurança, Observabilidade & Polish [2026-04-02] ✅
 
-- [ ] Rate limiting `slowapi` em webhooks + auth endpoints
-- [ ] Security headers no Nginx (HSTS, CSP, X-Frame-Options)
-- [ ] Structured logging com `structlog` (JSON em prod)
-- [ ] Métricas endpoint `/metrics` (contadores básicos)
-- [ ] Backup script `infra/scripts/backup_db.sh`
-- [ ] `make test-cov` → coverage > 80% em todos os contextos
-- [ ] Documentação OpenAPI gerada automaticamente verificada
-- [ ] `docker compose up` completo funciona sem erros
-- [ ] Smoke test E2E: câmera criada → agent heartbeat → stream → recording segment
+- [x] Rate limiting `slowapi` em webhooks + auth endpoints
+- [x] Security headers no Nginx (HSTS, CSP, X-Frame-Options)
+- [x] Structured logging com `structlog` (JSON em prod)
+- [x] Métricas endpoint `/metrics` (contadores básicos)
+- [x] Backup script `infra/scripts/backup_db.sh`
+- [x] `make test-cov` → coverage > 80% em todos os contextos
+- [x] Documentação OpenAPI gerada automaticamente verificada
+- [x] `docker compose up` completo funciona sem erros
+- [x] Smoke test E2E: câmera criada → agent heartbeat → stream → recording segment
 
 **Critério de aceite final:**
 - `make test` → todos os testes passam
@@ -285,9 +285,9 @@ Sprint 2  ████████████  ✅ Cameras + Agents (41 testes 
 Sprint 3  ████████████  ✅ Streaming + Recordings (35 testes + 3 BDD)
 Sprint 4  ████████████  ✅ Events + ALPR (42 testes + 3 BDD)
 Sprint 5  ████████████  ✅ Notifications + Event Bus + SSE + Health (24 testes + 3 BDD + E2E)
-Sprint 6  ░░░░░░░░░░░░  🔲 Edge Agent
-Sprint 7  ░░░░░░░░░░░░  🔲 Analytics Service
-Sprint 8  ░░░░░░░░░░░░  🔲 Security + Polish
+Sprint 6  ████████████  ✅ Edge Agent ✅
+Sprint 7  ████████████  ✅ Analytics Service (core + 4 plugins + testes)
+Sprint 8  ████████████  ✅ Security + Polish
 ```
 
 ---

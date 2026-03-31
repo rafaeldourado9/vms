@@ -9,6 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from redis.asyncio import Redis
 
 from vms.core.deps import CurrentUser, DbSession
+from vms.core.rate_limit import limiter
 from vms.events.domain import AlprDetection
 from vms.events.normalizers.base import registry
 # Importa normalizers para forçar auto-registro
@@ -50,7 +51,9 @@ def _event_svc(db: DbSession) -> EventService:
     summary="Webhook ALPR genérico",
     tags=["webhooks"],
 )
+@limiter.limit("30/minute")
 async def webhook_alpr_generic(
+    request: Request,
     body: AlprWebhookRequest,
     db: DbSession,
     redis: Redis = Depends(_get_redis),
@@ -77,7 +80,9 @@ async def webhook_alpr_generic(
     summary="Webhook ALPR por fabricante",
     tags=["webhooks"],
 )
+@limiter.limit("30/minute")
 async def webhook_alpr_vendor(
+    request: Request,
     manufacturer: str,
     body: dict,
     db: DbSession,
