@@ -2,6 +2,8 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom
 import { Toaster } from 'react-hot-toast'
 import { Layout } from '@/components/layout/Layout'
 import { useAuthStore } from '@/store/authStore'
+import { OnboardingWizard } from '@/components/wizard/OnboardingWizard'
+import { useOnboarding } from '@/hooks/useOnboarding'
 
 import { LoginPage }           from '@/pages/LoginPage'
 import { DashboardPage }       from '@/pages/DashboardPage'
@@ -21,6 +23,35 @@ function RequireAuth() {
   const { isAuthenticated } = useAuthStore()
   if (!isAuthenticated()) return <Navigate to="/login" replace />
   return <Outlet />
+}
+
+function AuthenticatedApp() {
+  const { complete, markComplete } = useOnboarding()
+
+  if (!complete) {
+    return <OnboardingWizard onComplete={markComplete} />
+  }
+
+  return (
+    <Routes>
+      <Route element={<Layout />}>
+        <Route index element={<Navigate to="/dashboard" replace />} />
+        <Route path="/dashboard"     element={<DashboardPage />} />
+        <Route path="/cameras"       element={<CamerasPage />} />
+        <Route path="/cameras/:id"   element={<CameraDetailPage />} />
+        <Route path="/cameras/:id/roi" element={<ROIEditorPage />} />
+        <Route path="/mosaic"        element={<MosaicPage />} />
+        <Route path="/recordings"    element={<RecordingsPage />} />
+        <Route path="/events"        element={<EventsPage />} />
+        <Route path="/analytics"     element={<AnalyticsPage />} />
+        <Route path="/agents"        element={<AgentsPage />} />
+        <Route path="/notifications" element={<NotificationsPage />} />
+        <Route path="/users"         element={<UsersPage />} />
+        <Route path="/settings"      element={<SettingsPage />} />
+        <Route path="*"              element={<Navigate to="/dashboard" replace />} />
+      </Route>
+    </Routes>
+  )
 }
 
 export default function App() {
@@ -44,22 +75,7 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
 
         <Route element={<RequireAuth />}>
-          <Route element={<Layout />}>
-            <Route index element={<Navigate to="/dashboard" replace />} />
-            <Route path="/dashboard"     element={<DashboardPage />} />
-            <Route path="/cameras"       element={<CamerasPage />} />
-            <Route path="/cameras/:id"   element={<CameraDetailPage />} />
-            <Route path="/cameras/:id/roi" element={<ROIEditorPage />} />
-            <Route path="/mosaic"        element={<MosaicPage />} />
-            <Route path="/recordings"    element={<RecordingsPage />} />
-            <Route path="/events"        element={<EventsPage />} />
-            <Route path="/analytics"     element={<AnalyticsPage />} />
-            <Route path="/agents"        element={<AgentsPage />} />
-            <Route path="/notifications" element={<NotificationsPage />} />
-            <Route path="/users"         element={<UsersPage />} />
-            <Route path="/settings"      element={<SettingsPage />} />
-            <Route path="*"              element={<Navigate to="/dashboard" replace />} />
-          </Route>
+          <Route path="/*" element={<AuthenticatedApp />} />
         </Route>
       </Routes>
     </BrowserRouter>

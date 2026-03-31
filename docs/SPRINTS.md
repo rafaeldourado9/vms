@@ -661,9 +661,9 @@ react-hot-toast                — notificações toast
 - `localStorage.setItem('onboarding_complete', '1')` para não mostrar novamente
 
 **Checklist:**
-- [ ] `components/wizard/OnboardingWizard.tsx` — wizard 5 passos
-- [ ] `App.tsx` — lógica de trigger do onboarding
-- [ ] `hooks/useOnboarding.ts` — estado + progresso + skip logic
+- [x] `components/wizard/OnboardingWizard.tsx` — wizard 5 passos
+- [x] `App.tsx` — lógica de trigger do onboarding
+- [x] `hooks/useOnboarding.ts` — estado + progresso + skip logic
 
 ---
 
@@ -858,9 +858,9 @@ Agent:        [select — apenas para RTSP/P2P]
 ```
 
 **Checklist:**
-- [ ] `components/wizard/AddCameraWizard.tsx` — wizard 5-6 passos, todos os protocolos
-- [ ] `hooks/useConnectionTest.ts` — lógica de teste RTSP/ONVIF com estados loading/ok/error
-- [ ] Tipos TypeScript para todos os form states por protocolo
+- [x] `components/wizard/AddCameraWizard.tsx` — wizard 5-6 passos, todos os protocolos
+- [x] `hooks/useConnectionTest.ts` — lógica de teste RTSP/ONVIF com estados loading/ok/error
+- [x] Tipos TypeScript para todos os form states por protocolo
 
 ---
 

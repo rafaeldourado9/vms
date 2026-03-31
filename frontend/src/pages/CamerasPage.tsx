@@ -3,13 +3,12 @@ import { Plus, Search, LayoutGrid, List, Trash2, Settings } from 'lucide-react'
 import { useNavigate } from 'react-router-dom'
 import { clsx } from 'clsx'
 import { camerasService } from '@/services/cameras'
-import { agentsService } from '@/services/agents'
 import { CameraCard } from '@/components/camera/CameraCard'
 import { PageSpinner } from '@/components/ui/Spinner'
-import { Modal } from '@/components/ui/Modal'
+import { AddCameraWizard } from '@/components/wizard/AddCameraWizard'
 import { usePermission } from '@/hooks/usePermission'
 import toast from 'react-hot-toast'
-import type { Camera, Agent } from '@/types'
+import type { Camera } from '@/types'
 
 type ViewMode = 'grid' | 'list'
 type FilterStatus = 'all' | 'online' | 'offline'
@@ -18,33 +17,18 @@ export function CamerasPage() {
   const navigate = useNavigate()
   const { isAdmin } = usePermission()
 
-  const [cameras, setCameras]       = useState<Camera[]>([])
-  const [agents, setAgents]         = useState<Agent[]>([])
-  const [loading, setLoading]       = useState(true)
-  const [search, setSearch]         = useState('')
-  const [view, setView]             = useState<ViewMode>('grid')
-  const [filter, setFilter]         = useState<FilterStatus>('all')
-  const [showAdd, setShowAdd]       = useState(false)
-  const [addLoading, setAddLoading] = useState(false)
-
-  const [form, setForm] = useState({
-    name: '',
-    location: '',
-    stream_protocol: 'rtsp_pull',
-    rtsp_url: '',
-    agent_id: '',
-    retention_days: 7,
-  })
+  const [cameras, setCameras] = useState<Camera[]>([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch]   = useState('')
+  const [view, setView]       = useState<ViewMode>('grid')
+  const [filter, setFilter]   = useState<FilterStatus>('all')
+  const [showAdd, setShowAdd] = useState(false)
 
   const load = () => {
     setLoading(true)
-    Promise.all([
-      camerasService.list({ page_size: 200 }),
-      agentsService.list(),
-    ]).then(([cams, ags]) => {
-      setCameras(cams)
-      setAgents(ags)
-    }).finally(() => setLoading(false))
+    camerasService.list({ page_size: 200 })
+      .then(setCameras)
+      .finally(() => setLoading(false))
   }
 
   useEffect(() => { load() }, [])
@@ -64,30 +48,6 @@ export function CamerasPage() {
       toast.success('Câmera removida')
       load()
     } catch { toast.error('Erro ao remover câmera') }
-  }
-
-  const handleAdd = async () => {
-    if (!form.name) return
-    setAddLoading(true)
-    try {
-      await camerasService.create({
-        name:            form.name,
-        location:        form.location || undefined,
-        stream_protocol: form.stream_protocol,
-        rtsp_url:        form.stream_protocol === 'rtsp_pull' ? form.rtsp_url : undefined,
-        agent_id:        form.stream_protocol === 'rtsp_pull' ? form.agent_id || undefined : undefined,
-        retention_days:  form.retention_days,
-      })
-      toast.success('Câmera criada')
-      setShowAdd(false)
-      setForm({ name: '', location: '', stream_protocol: 'rtsp_pull', rtsp_url: '', agent_id: '', retention_days: 7 })
-      load()
-    } catch (err: unknown) {
-      const axiosErr = err as { response?: { data?: { detail?: string } } }
-      toast.error(axiosErr.response?.data?.detail ?? 'Erro ao criar câmera')
-    } finally {
-      setAddLoading(false)
-    }
   }
 
   return (
@@ -228,103 +188,11 @@ export function CamerasPage() {
         </>
       )}
 
-      {/* Add Camera Modal */}
-      <Modal
+      <AddCameraWizard
         open={showAdd}
         onClose={() => setShowAdd(false)}
-        title="Nova Câmera"
-        size="md"
-        footer={
-          <>
-            <button className="btn btn-ghost" onClick={() => setShowAdd(false)}>Cancelar</button>
-            <button className="btn btn-primary" onClick={handleAdd} disabled={addLoading || !form.name}>
-              {addLoading ? 'Criando...' : 'Criar Câmera'}
-            </button>
-          </>
-        }
-      >
-        <div className="space-y-4">
-          <div>
-            <label className="label">Nome *</label>
-            <input
-              className="input"
-              placeholder="Ex: Câmera Entrada"
-              value={form.name}
-              onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-            />
-          </div>
-          <div>
-            <label className="label">Localização</label>
-            <input
-              className="input"
-              placeholder="Ex: Portaria Principal"
-              value={form.location}
-              onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
-            />
-          </div>
-          <div>
-            <label className="label">Protocolo</label>
-            <div className="grid grid-cols-3 gap-2">
-              {[
-                { id: 'rtsp_pull', label: 'RTSP Pull' },
-                { id: 'rtmp_push', label: 'RTMP Push' },
-                { id: 'onvif',     label: 'ONVIF' },
-              ].map((p) => (
-                <button
-                  key={p.id}
-                  onClick={() => setForm((f) => ({ ...f, stream_protocol: p.id }))}
-                  className={clsx(
-                    'px-3 py-2 rounded-lg text-xs font-medium border transition',
-                    form.stream_protocol === p.id
-                      ? 'text-white border-accent'
-                      : 'text-t2 border-border hover:text-t1',
-                  )}
-                  style={form.stream_protocol === p.id ? { background: 'var(--accent)', borderColor: 'var(--accent)' } : {}}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          {form.stream_protocol === 'rtsp_pull' && (
-            <>
-              <div>
-                <label className="label">URL RTSP *</label>
-                <input
-                  className="input"
-                  placeholder="rtsp://192.168.1.100:554/stream"
-                  value={form.rtsp_url}
-                  onChange={(e) => setForm((f) => ({ ...f, rtsp_url: e.target.value }))}
-                />
-              </div>
-              <div>
-                <label className="label">Agent *</label>
-                <select
-                  className="input"
-                  value={form.agent_id}
-                  onChange={(e) => setForm((f) => ({ ...f, agent_id: e.target.value }))}
-                >
-                  <option value="">Selecionar agent...</option>
-                  {agents.map((a) => (
-                    <option key={a.id} value={a.id}>{a.name}</option>
-                  ))}
-                </select>
-              </div>
-            </>
-          )}
-          <div>
-            <label className="label">Retenção (dias)</label>
-            <input
-              type="number"
-              className="input"
-              min={1}
-              max={90}
-              value={form.retention_days}
-              onChange={(e) => setForm((f) => ({ ...f, retention_days: parseInt(e.target.value, 10) || 7 }))}
-            />
-          </div>
-        </div>
-      </Modal>
+        onCreated={() => { setShowAdd(false); load() }}
+      />
     </div>
   )
 }
