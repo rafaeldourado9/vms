@@ -159,6 +159,27 @@ async def get_clip(
     return ClipResponse.model_validate(clip)
 
 
+@router.get(
+    "/recordings/{recording_id}/download",
+    summary="URL de download de segmento",
+    tags=["recordings"],
+)
+async def download_recording(
+    recording_id: str,
+    claims: CurrentUser,
+    db: DbSession,
+) -> dict:
+    """Retorna URL de download do arquivo de gravação (redirect para nginx)."""
+    svc = _recording_svc(db)
+    segment = await svc._segments.get_by_id(recording_id, claims.tenant_id)
+    if not segment:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gravação não encontrada")
+    import os
+    filename = os.path.basename(segment.file_path)
+    download_url = f"/recordings/{filename}"
+    return {"download_url": download_url, "file_path": segment.file_path}
+
+
 @router.post(
     "/recordings/clips",
     response_model=ClipResponse,

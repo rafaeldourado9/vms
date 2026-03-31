@@ -1,9 +1,14 @@
 """Rotas HTTP do bounded context de câmeras e agents."""
 from __future__ import annotations
 
+import asyncio
+import json
+import logging
 import time
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
+
+logger = logging.getLogger(__name__)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vms.cameras.repository import AgentRepository, CameraRepository
@@ -431,3 +436,75 @@ async def delete_agent(
     """Remove agent e revoga sua API key."""
     svc = _agent_svc(db)
     await svc.delete_agent(agent_id, claims.tenant_id)
+
+
+@router.websocket("/agents/me/ws")
+async def agent_ws(
+    websocket: WebSocket,
+    api_key: str = Query(..., alias="api_key"),
+    db: DbSession = None,  # type: ignore[assignment]
+) -> None:
+    """
+    WebSocket persistente para config push imediato ao agent.
+
+    Agent autentica com ?api_key=<key> na query string.
+    Recebe mensagens: config_updated, camera_added, camera_removed, restart_stream.
+    """
+    from vms.core.database import get_session_factory
+    from vms.core.config import get_settings
+    import redis.asyncio as aioredis
+
+    await websocket.accept()
+
+    # Autentica API key
+    try:
+        factory = get_session_factory()
+        async with factory() as session:
+            from vms.iam.service import AuthService
+            from vms.iam.repository import ApiKeyRepository as IamApiKeyRepo
+
+            auth_svc = AuthService(
+                user_repo=None,  # type: ignore[arg-type]
+                api_key_repo=IamApiKeyRepo(session),
+            )
+            key_entity = await auth_svc.authenticate_api_key(api_key)
+            agent_id = key_entity.owner_id
+            tenant_id = key_entity.tenant_id
+    except Exception:
+        await websocket.close(code=4001, reason="API key inválida")
+        return
+
+    settings = get_settings()
+    redis_client = aioredis.from_url(settings.redis_url)
+    channel = f"agent:{agent_id}:config"
+
+    async with redis_client.pubsub() as pubsub:
+        await pubsub.subscribe(channel)
+        logger.info("Agent %s conectado via WebSocket (tenant=%s)", agent_id, tenant_id)
+
+        async def _receive_ws() -> None:
+            """Aguarda desconexão do client."""
+            try:
+                while True:
+                    await websocket.receive_text()
+            except WebSocketDisconnect:
+                pass
+
+        receive_task = asyncio.create_task(_receive_ws())
+
+        try:
+            while True:
+                message = await asyncio.wait_for(pubsub.get_message(ignore_subscribe_messages=True), timeout=30.0)
+                if message and message["type"] == "message":
+                    await websocket.send_text(message["data"])
+                if receive_task.done():
+                    break
+        except (asyncio.TimeoutError, WebSocketDisconnect):
+            pass
+        except Exception as exc:
+            logger.warning("Agent WS erro: %s", exc)
+        finally:
+            receive_task.cancel()
+            await pubsub.unsubscribe(channel)
+            await redis_client.aclose()
+            logger.info("Agent %s desconectado do WebSocket", agent_id)

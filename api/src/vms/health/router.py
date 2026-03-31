@@ -4,9 +4,10 @@ from __future__ import annotations
 import logging
 
 import aio_pika
+import httpx
 import redis.asyncio as aioredis
 from fastapi import APIRouter
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 
 from vms.core.config import get_settings
 from vms.core.database import get_session_factory
@@ -42,6 +43,18 @@ async def _check_redis() -> str:
         return f"error: {exc}"
 
 
+async def _check_mediamtx() -> str:
+    """Verifica conectividade com a API do MediaMTX."""
+    try:
+        settings = get_settings()
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            resp = await client.get(f"{settings.mediamtx_api_url}/v3/config/global/get")
+        return "ok" if resp.status_code == 200 else "degraded"
+    except Exception as exc:
+        logger.warning("Health check MediaMTX falhou: %s", exc)
+        return "degraded"
+
+
 async def _check_rabbitmq() -> str:
     """Verifica conectividade com o RabbitMQ."""
     try:
@@ -52,6 +65,23 @@ async def _check_rabbitmq() -> str:
     except Exception as exc:
         logger.warning("Health check RabbitMQ falhou: %s", exc)
         return f"error: {exc}"
+
+
+async def _camera_counts() -> tuple[int, int]:
+    """Retorna (cameras_online, cameras_total) do banco."""
+    try:
+        from vms.cameras.models import CameraModel
+
+        factory = get_session_factory()
+        async with factory() as session:
+            total = await session.scalar(select(func.count(CameraModel.id))) or 0
+            online = await session.scalar(
+                select(func.count(CameraModel.id)).where(CameraModel.is_online.is_(True))
+            ) or 0
+        return online, total
+    except Exception as exc:
+        logger.warning("Camera counts falhou: %s", exc)
+        return 0, 0
 
 
 @router.get("/health", summary="Health check", tags=["health"])
@@ -65,9 +95,12 @@ async def health_check() -> dict:
     db_status = await _check_db()
     redis_status = await _check_redis()
     rabbitmq_status = await _check_rabbitmq()
+    mediamtx_status = await _check_mediamtx()
+
+    cameras_online, cameras_total = await _camera_counts()
 
     all_ok = all(
-        s == "ok" for s in (db_status, redis_status, rabbitmq_status)
+        s == "ok" for s in (db_status, redis_status, rabbitmq_status, mediamtx_status)
     )
 
     return {
@@ -76,7 +109,10 @@ async def health_check() -> dict:
             "db": db_status,
             "redis": redis_status,
             "rabbitmq": rabbitmq_status,
+            "mediamtx": mediamtx_status,
         },
+        "cameras_online": cameras_online,
+        "cameras_total": cameras_total,
         "version": _VERSION,
     }
 

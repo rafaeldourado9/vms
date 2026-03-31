@@ -219,3 +219,57 @@ docker compose up -d --build
 - Verificar permissão em `/mnt/recordings`
 - Checar webhook `segment_ready` no MediaMTX config
 - Logs: `docker compose logs worker`
+
+---
+
+## Conectividade NAT / P2P
+
+### Arquitetura de fluxo de vídeo
+
+O VMS resolve o problema de NAT de forma assimétrica:
+
+| Fluxo | Direção | Problema NAT | Solução |
+|-------|---------|-------------|---------|
+| Vídeo (RTMP) | Agent → VMS | Agent inicia conexão de saída | Sem problema — saída sempre funciona |
+| Config push (WS) | Agent → VMS | Agent inicia WebSocket de saída | Sem problema — saída sempre funciona |
+| HLS/WebRTC viewer | Browser → VMS | Browser acessa VMS diretamente | Sem problema — VMS tem IP público |
+
+**O Agent nunca precisa de porta aberta.** Ele sempre inicia as conexões.
+
+### WebRTC e ICE (STUN/TURN)
+
+Para viewers WebRTC, o browser precisa estabelecer ICE com o MediaMTX.
+
+**STUN (padrão):**
+Configurado automaticamente com `stun:stun.l.google.com:19302`.
+Funciona em 90% dos casos (NAT cone, NAT full cone, NAT restrito).
+
+**TURN (NAT simétrico):**
+Necessário quando o viewer está atrás de NAT simétrico (empresas, alguns provedores móveis).
+
+Para habilitar TURN, configure em `.env`:
+```bash
+TURN_URL=turn:turn.suaempresa.com:3478
+TURN_USERNAME=usuario-turn
+TURN_CREDENTIAL=senha-turn
+```
+
+**Instalar coturn (servidor TURN próprio):**
+```bash
+# Ubuntu/Debian
+apt install coturn
+
+# Editar /etc/turnserver.conf
+realm=suaempresa.com
+server-name=turn.suaempresa.com
+listening-port=3478
+lt-cred-mech
+user=usuario:senha
+external-ip=SEU_IP_PUBLICO
+
+# Iniciar
+systemctl enable --now coturn
+```
+
+> **Quando TURN é necessário:** se viewers em redes corporativas ou 4G não conseguem
+> visualizar WebRTC mas HLS funciona, é NAT simétrico → configure TURN.

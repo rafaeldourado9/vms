@@ -10,6 +10,8 @@ requires-python = ">=3.12"
 dependencies = [
     # HTTP client
     "httpx>=0.28",
+    # WebSocket client (config push)
+    "websockets>=13.0",
     # Validação / settings
     "pydantic>=2.10",
     "pydantic-settings>=2.7",

@@ -34,18 +34,23 @@ def _streaming_svc(db: DbSession) -> StreamingService:
 )
 async def publish_auth(body: PublishAuthRequest, db: DbSession) -> PublishAuthResponse:
     """
-    MediaMTX chama antes de aceitar publisher.
+    MediaMTX chama antes de aceitar publisher ou viewer (authHTTPAddress).
 
-    Valida stream key (câmeras RTMP push) ou API key (agents).
+    Despacha para verify_viewer_token quando action=="read",
+    caso contrário valida stream key (câmeras RTMP push) ou API key (agents).
     """
     token = _extract_token(body.query)
     svc = _streaming_svc(db)
-    allowed = await svc.verify_publish_token(body.path, token)
+
+    if body.action == "read":
+        allowed = await svc.verify_viewer_token(token, body.path)
+    else:
+        allowed = await svc.verify_publish_token(body.path, token)
 
     if not allowed:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Publicação não autorizada",
+            detail="Não autorizado",
         )
 
     return PublishAuthResponse(ok=True)

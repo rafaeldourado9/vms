@@ -2,6 +2,7 @@ services:
   # ─── Infraestrutura ──────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     environment:
       POSTGRES_DB: vms
       POSTGRES_USER: vms
@@ -18,6 +19,7 @@ services:
 
   redis:
     image: redis:7-alpine
+    restart: unless-stopped
     command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -28,6 +30,7 @@ services:
 
   rabbitmq:
     image: rabbitmq:3-management-alpine
+    restart: unless-stopped
     environment:
       RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-vms}
       RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-vmsdev}
@@ -43,11 +46,16 @@ services:
   # ─── Streaming ────────────────────────────────────────────────────────────
   mediamtx:
     build: ./infra/mediamtx
+    restart: unless-stopped
     ports:
       - "8554:8554"   # RTSP
       - "1935:1935"   # RTMP
       - "8888:8888"   # HLS
       - "8889:8889"   # WebRTC
+    environment:
+      - TURN_URL=${TURN_URL:-}
+      - TURN_USERNAME=${TURN_USERNAME:-}
+      - TURN_CREDENTIAL=${TURN_CREDENTIAL:-}
     volumes:
       - ./infra/mediamtx/mediamtx.yml:/mediamtx.yml:ro
       - recordings:/recordings
@@ -58,6 +66,7 @@ services:
     build:
       context: ./api
       target: production
+    restart: unless-stopped
     environment:
       - DATABASE_URL=postgresql+asyncpg://vms:${POSTGRES_PASSWORD:-vmsdev}@postgres:5432/vms
       - REDIS_URL=redis://redis:6379/0
@@ -90,6 +99,7 @@ services:
     build:
       context: ./api
       target: production
+    restart: unless-stopped
     command: python -m arq vms.worker.WorkerSettings
     environment:
       - DATABASE_URL=postgresql+asyncpg://vms:${POSTGRES_PASSWORD:-vmsdev}@postgres:5432/vms
@@ -112,6 +122,7 @@ services:
     build:
       context: ./analytics
       target: production
+    restart: unless-stopped
     environment:
       - VMS_API_URL=http://api:8000
       - VMS_ANALYTICS_API_KEY=${ANALYTICS_API_KEY:-dev-analytics-key}
@@ -133,6 +144,7 @@ services:
   # ─── Nginx ────────────────────────────────────────────────────────────────
   nginx:
     image: nginx:1.25-alpine
+    restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"

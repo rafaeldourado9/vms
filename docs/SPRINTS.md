@@ -103,8 +103,8 @@
 - [x] `tests/integration/test_agents.py` — 5 testes config, heartbeat, API key
 - [x] `tests/bdd/features/cameras.feature` + steps — 5 cenários BDD
 - [x] `tests/bdd/features/agents.feature` + steps — 5 cenários BDD
-- [ ] `tests/unit/cameras/test_onvif_client.py` — mock ONVIF responses
-- [ ] `tests/unit/cameras/test_snapshot.py` — snapshot via ONVIF e ffmpeg
+- [x] `tests/unit/cameras/test_onvif_client.py` — mock ONVIF responses
+- [x] `tests/unit/cameras/test_snapshot.py` — snapshot via ONVIF e ffmpeg
 
 **Critério de aceite:** Camera RTMP push criada → MediaMTX path configurado sem agent; ONVIF camera → rtsp_url extraída automaticamente; snapshot endpoint retorna JPEG
 
@@ -150,8 +150,8 @@
 - [x] `streaming/service.py` — `verify_viewer_token(token, path)` → bool (usado pelo MediaMTX read-auth hook)
 - [x] `POST /streaming/read-auth` — hook MediaMTX para autenticar viewers HLS/WebRTC
 - [x] `GET /api/v1/cameras/{id}/stream-urls` → retorna `{ hls_url, webrtc_url, rtsp_url, token, expires_at }` (já existia como stream-urls)
-- [ ] Atualizar `infra/mediamtx/mediamtx.yml` — configurar `readAuthURL` apontando para `/streaming/read-auth`
-- [ ] Atualizar `infra/nginx/nginx.conf` — `/hls/` e `/webrtc/` passam token para MediaMTX (proxy_pass sem bloquear)
+- [x] Atualizar `infra/mediamtx/mediamtx.yml` — `authHTTPAddress` despacha publish e read via campo `action`
+- [x] Atualizar `infra/nginx/nginx.conf` — `/hls/` e `/webrtc/` passam token para MediaMTX (proxy_pass sem bloquear)
 
 ### 3.3 RTMP Direct Push (câmeras sem agent)
 
@@ -161,7 +161,7 @@
 - [x] Atualizar `streaming/service.py` — `verify_publish_token` aceita stream key de câmeras RTMP push
 - [x] `GET /api/v1/cameras/{id}/rtmp-config` → retorna `{ rtmp_url, stream_key }` para configurar câmera
 - [x] `cameras/service.py` — gera `rtmp_stream_key` aleatório ao criar câmera RTMP push (já existia)
-- [ ] `tests/integration/test_rtmp_push.py` — simular publish-auth com stream key
+- [x] `tests/integration/test_rtmp_push.py` — simular publish-auth com stream key
 
 ### 3.4 Recordings (Bounded Context)
 
@@ -172,7 +172,7 @@
 - [x] `recordings/schemas.py`
 - [x] `recordings/router.py` — GET /recordings, POST /recordings/clips
 - [x] `recordings/tasks.py` — ARQ tasks: index_segment, cleanup_segments
-- [ ] `GET /api/v1/recordings/{id}/download` → redirect para URL assinada do arquivo
+- [x] `GET /api/v1/recordings/{id}/download` → redirect para URL assinada do arquivo
 - [x] `GET /api/v1/cameras/{id}/timeline` → segmentos agrupados por hora para UI de playback
 - [x] `GET /api/v1/recordings/clips/{id}` → status do clip (polling para UI saber quando ficou pronto)
 
@@ -184,9 +184,9 @@
 - [x] `tests/integration/test_mediamtx_hooks.py` — 6 testes publish-auth + webhooks
 - [x] `tests/integration/test_recordings.py` — 5 testes segments + clips
 - [x] `tests/bdd/features/recording.feature` + steps — 3 cenários BDD
-- [ ] `tests/unit/streaming/test_viewer_token.py` — geração + verificação de tokens de viewer
-- [ ] `tests/integration/test_read_auth.py` — hook read-auth MediaMTX
-- [ ] `tests/integration/test_rtmp_push_auth.py` — publish-auth com stream key
+- [x] `tests/unit/streaming/test_viewer_token.py` — geração + verificação de tokens de viewer
+- [x] `tests/integration/test_read_auth.py` — hook read-auth MediaMTX
+- [x] `tests/integration/test_rtmp_push_auth.py` — publish-auth com stream key
 
 **Critério de aceite:** `GET /cameras/{id}/stream` → URL HLS com token válido; viewer sem token → 401 no read-auth; RTMP push com stream key correto → aceito; câmera sem token → rejeitado
 
@@ -248,8 +248,8 @@
 ### 5.4 Health check
 
 - [x] `health/router.py` — GET /health (DB + Redis + RabbitMQ)
-- [ ] Adicionar ao health: `mediamtx: "ok"|"degraded"` — checar `/v3/config/global/get` da API MediaMTX
-- [ ] Adicionar ao health: `cameras_online: int` e `cameras_total: int`
+- [x] Adicionar ao health: `mediamtx: "ok"|"degraded"` — checar `/v3/config/global/get` da API MediaMTX
+- [x] Adicionar ao health: `cameras_online: int` e `cameras_total: int`
 
 ### 5.5 Testes Sprint 5
 
@@ -283,38 +283,38 @@
 > O que falta: config push do VMS para o agent (atual = polling 30s → lento).
 > E: acesso RTSP direto ao agent quando VMS precisa puxar stream (analytics server-side).
 
-- [ ] `edge_agent/src/agent/cloud_client.py` — WebSocket persistente para receber config push imediato
+- [x] `edge_agent/src/agent/cloud_client.py` — WebSocket persistente para receber config push imediato
   - Conecta em `wss://vms.host/api/v1/agents/me/ws` com API key
   - Recebe mensagens: `config_updated`, `camera_added`, `camera_removed`, `restart_stream`
   - Fallback para polling se WebSocket cair
-- [ ] `api/src/vms/cameras/router.py` — `GET /api/v1/agents/me/ws` WebSocket endpoint
+- [x] `api/src/vms/cameras/router.py` — `GET /api/v1/agents/me/ws` WebSocket endpoint
   - Autentica via API key no handshake
   - Publica no Redis channel `agent:{agent_id}:config` quando config muda
   - Redis pub/sub → WebSocket push
-- [ ] `cameras/service.py` — ao criar/atualizar/deletar câmera, publicar evento no channel do agent
-- [ ] Documentar abordagem P2P/NAT em `docs/DEPLOY.md`:
+- [x] `cameras/service.py` — ao criar/atualizar/deletar câmera, publicar evento no channel do agent
+- [x] Documentar abordagem P2P/NAT em `docs/DEPLOY.md`:
   - Agent faz RTMP push para o VMS (fluxo de saída — sem problema de NAT)
   - Analytics acessa via MediaMTX (stream já está no VMS)
   - STUN/TURN para WebRTC: documentar configuração do MediaMTX com servidor STUN público e opção TURN próprio
-- [ ] `infra/mediamtx/mediamtx.yml` — adicionar seção `webrtc.iceServers` com STUN público + opção TURN
+- [x] `infra/mediamtx/mediamtx.yml` — adicionar seção `webrtc.iceServers` com STUN público + opção TURN
 
 ### 6.3 STUN/TURN para Playback WebRTC
 
 > Viewers fora da rede local precisam de ICE para estabelecer WebRTC.
 > MediaMTX suporta ICE servers configuráveis.
 
-- [ ] `infra/mediamtx/mediamtx.yml` — configurar ICE servers: STUN público (stun.l.google.com) + TURN opcional
-- [ ] `.env.example` — variáveis: `TURN_URL`, `TURN_USERNAME`, `TURN_CREDENTIAL`
-- [ ] `docker-compose.yml` — passar variáveis TURN para o serviço mediamtx
-- [ ] Documentar em `docs/DEPLOY.md`: quando TURN é necessário (NAT simétrico) e como configurar coturn
+- [x] `infra/mediamtx/mediamtx.yml` — configurar ICE servers: STUN público (stun.l.google.com) + TURN opcional
+- [x] `.env.example` — variáveis: `TURN_URL`, `TURN_USERNAME`, `TURN_CREDENTIAL`
+- [x] `docker-compose.yml` — passar variáveis TURN para o serviço mediamtx
+- [x] Documentar em `docs/DEPLOY.md`: quando TURN é necessário (NAT simétrico) e como configurar coturn
 
 ### 6.4 Testes Sprint 6
 
 - [x] `edge_agent/tests/test_stream_manager.py` — start/stop/restart streams
 - [x] `edge_agent/tests/test_cloud_client.py` — config poll, heartbeat
 - [x] `tests/bdd/features/edge_agent.feature` + steps
-- [ ] `edge_agent/tests/test_websocket_client.py` — receber config push via WebSocket
-- [ ] `api/tests/integration/test_agent_ws.py` — WebSocket endpoint com API key auth
+- [x] `edge_agent/tests/test_websocket_client.py` — receber config push via WebSocket
+- [x] `api/tests/integration/test_agent_ws.py` — WebSocket endpoint com API key auth
 
 **Critério de aceite:** Config change no VMS → agent recebe em < 1s via WebSocket; stream reinicia automaticamente
 
@@ -382,9 +382,9 @@
   - Mais simples: MediaMTX lida via `readAuthURL` hook — nginx apenas faz proxy
 - [ ] Nginx: `/recordings/` serve arquivos apenas com JWT válido
   - Usar `auth_request` apontando para `/api/v1/recordings/{id}/access-check`
-- [ ] Rate limit diferenciado: webhooks câmera (500/min), API auth (5/min), API geral (120/min), SSE (30 conexões simultâneas)
+- [x] Rate limit diferenciado: webhooks câmera (500/min), API auth (5/min), API geral (120/min), SSE (30 conexões simultâneas)
 - [ ] ARQ dead letter queue — tasks que falham 3× → DLQ + alerta via NotificationRule tipo `system.task_failed`
-- [ ] `docker-compose.yml` — adicionar `restart: unless-stopped` em todos os serviços críticos
+- [x] `docker-compose.yml` — adicionar `restart: unless-stopped` em todos os serviços críticos
 - [ ] Smoke test completo RTMP push: câmera RTMP → stream live → recording → download
 
 **Critério de aceite final:**

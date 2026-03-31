@@ -69,7 +69,7 @@ class EdgeAgent:
         logger.info("EdgeAgent encerrado")
 
     async def run(self) -> None:
-        """Executa loops de polling e heartbeat até sinal de shutdown."""
+        """Executa loops de polling, heartbeat e config push até sinal de shutdown."""
         poll_interval = self._settings.config_poll_interval
         heartbeat_interval = self._settings.heartbeat_interval
 
@@ -77,13 +77,23 @@ class EdgeAgent:
         heartbeat_task = asyncio.create_task(
             self._heartbeat_loop(heartbeat_interval), name="heartbeat"
         )
+        ws_task = asyncio.create_task(
+            self._client.listen_for_config_push(self._on_config_push), name="ws_push"
+        )
 
         try:
-            await asyncio.gather(poll_task, heartbeat_task)
+            await asyncio.gather(poll_task, heartbeat_task, ws_task)
         except asyncio.CancelledError:
-            poll_task.cancel()
-            heartbeat_task.cancel()
-            await asyncio.gather(poll_task, heartbeat_task, return_exceptions=True)
+            for task in (poll_task, heartbeat_task, ws_task):
+                task.cancel()
+            await asyncio.gather(poll_task, heartbeat_task, ws_task, return_exceptions=True)
+
+    async def _on_config_push(self, event: dict) -> None:
+        """Processa evento de config push recebido via WebSocket."""
+        event_type = event.get("event", "")
+        if event_type in ("config_updated", "camera_added", "camera_removed", "restart_stream"):
+            logger.info("Config push recebido", event=event_type)
+            await self._sync_config()
 
     async def _poll_loop(self, interval: int) -> None:
         """Faz polling de configuração periodicamente."""

@@ -51,7 +51,7 @@ def _event_svc(db: DbSession) -> EventService:
     summary="Webhook ALPR genérico",
     tags=["webhooks"],
 )
-@limiter.limit("30/minute")
+@limiter.limit("500/minute")
 async def webhook_alpr_generic(
     request: Request,
     body: AlprWebhookRequest,
@@ -80,7 +80,7 @@ async def webhook_alpr_generic(
     summary="Webhook ALPR por fabricante",
     tags=["webhooks"],
 )
-@limiter.limit("30/minute")
+@limiter.limit("500/minute")
 async def webhook_alpr_vendor(
     request: Request,
     manufacturer: str,

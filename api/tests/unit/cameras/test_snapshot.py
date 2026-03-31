@@ -33,7 +33,7 @@ class TestGetSnapshotUrl:
             snapshot_url="http://192.168.1.10/Streaming/Channels/1/picture",
         )
         with patch(
-            "vms.cameras.snapshot.OnvifClient.probe",
+            "vms.cameras.onvif_client.OnvifClient.probe",
             AsyncMock(return_value=probe_result),
         ):
             url = await get_snapshot_url(camera)
@@ -53,7 +53,7 @@ class TestGetSnapshotUrl:
         )
         probe_result = OnvifProbeResult(reachable=True, snapshot_url=None)
         with patch(
-            "vms.cameras.snapshot.OnvifClient.probe",
+            "vms.cameras.onvif_client.OnvifClient.probe",
             AsyncMock(return_value=probe_result),
         ):
             url = await get_snapshot_url(camera)

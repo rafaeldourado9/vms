@@ -28,6 +28,8 @@ class RecordingSegmentRepositoryPort(Protocol):
         offset: int = 0,
     ) -> tuple[list[RecordingSegment], int]: ...
 
+    async def get_by_id(self, segment_id: str, tenant_id: str) -> RecordingSegment | None: ...
+
     async def delete_older_than(
         self, tenant_id: str, camera_id: str, before_date: datetime
     ) -> int: ...
@@ -127,6 +129,15 @@ class RecordingSegmentRepository:
         stmt = base.order_by(RecordingSegmentModel.started_at.desc()).limit(limit).offset(offset)
         result = await self._session.scalars(stmt)
         return [_segment_to_domain(m) for m in result.all()], total
+
+    async def get_by_id(self, segment_id: str, tenant_id: str) -> RecordingSegment | None:
+        """Busca segmento por ID e tenant."""
+        stmt = select(RecordingSegmentModel).where(
+            RecordingSegmentModel.id == segment_id,
+            RecordingSegmentModel.tenant_id == tenant_id,
+        )
+        model = await self._session.scalar(stmt)
+        return _segment_to_domain(model) if model else None
 
     async def delete_older_than(
         self, tenant_id: str, camera_id: str, before_date: datetime

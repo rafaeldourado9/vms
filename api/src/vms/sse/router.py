@@ -5,13 +5,16 @@ import asyncio
 import json
 import logging
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
 
 from vms.core.deps import CurrentUser
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+
+_SSE_MAX_CONNECTIONS = 30
+_sse_active = 0
 
 
 @router.get(
@@ -28,16 +31,25 @@ async def sse_stream(
 
     Escuta canal Redis `sse:{tenant_id}` e envia eventos ao cliente.
     """
+    global _sse_active
+    if _sse_active >= _SSE_MAX_CONNECTIONS:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Limite de conexões SSE atingido. Tente novamente mais tarde.",
+        )
+
     tenant_id = claims.tenant_id
 
     async def event_generator():
         """Gera eventos SSE via Redis pub/sub."""
+        global _sse_active
+        _sse_active += 1
         redis = request.app.state.redis
         channel_name = f"sse:{tenant_id}"
 
         pubsub = redis.pubsub()
         await pubsub.subscribe(channel_name)
-        logger.info("SSE conectado: tenant=%s", tenant_id)
+        logger.info("SSE conectado: tenant=%s (ativas=%d)", tenant_id, _sse_active)
 
         try:
             while True:
@@ -59,9 +71,10 @@ async def sse_stream(
         except asyncio.CancelledError:
             pass
         finally:
+            _sse_active -= 1
             await pubsub.unsubscribe(channel_name)
             await pubsub.aclose()
-            logger.info("SSE desconectado: tenant=%s", tenant_id)
+            logger.info("SSE desconectado: tenant=%s (ativas=%d)", tenant_id, _sse_active)
 
     return StreamingResponse(
         event_generator(),

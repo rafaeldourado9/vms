@@ -1,8 +1,12 @@
 """Casos de uso do bounded context de câmeras e agents."""
 from __future__ import annotations
 
+import json
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
+
+logger = logging.getLogger(__name__)
 
 from vms.cameras.domain import (
     Agent,
@@ -82,6 +86,8 @@ class CameraService:
         )
         saved = await self._cameras.create(camera)
         await self._mediamtx.add_path(saved.mediamtx_path)
+        if saved.agent_id:
+            await _notify_agent(saved.agent_id, "camera_added", {"camera_id": saved.id})
         return saved
 
     async def get_camera(self, camera_id: str, tenant_id: str) -> Camera:
@@ -134,13 +140,19 @@ class CameraService:
             camera.agent_id = agent_id
         if is_active is not None:
             camera.is_active = is_active
-        return await self._cameras.update(camera)
+        updated = await self._cameras.update(camera)
+        if updated.agent_id:
+            await _notify_agent(updated.agent_id, "config_updated", {"camera_id": updated.id})
+        return updated
 
     async def delete_camera(self, camera_id: str, tenant_id: str) -> None:
         """Remove câmera. Best-effort: não falha se MediaMTX inacessível."""
         camera = await self.get_camera(camera_id, tenant_id)
+        agent_id = camera.agent_id
         await self._mediamtx.remove_path(camera.mediamtx_path)
         await self._cameras.delete(camera_id, tenant_id)
+        if agent_id:
+            await _notify_agent(agent_id, "camera_removed", {"camera_id": camera_id})
 
     async def get_stream_urls(
         self, camera_id: str, tenant_id: str, viewer_token: str, mediamtx_host: str
@@ -256,3 +268,18 @@ class AgentService:
         agent = await self.get_agent(agent_id, tenant_id)
         agent.mark_offline()
         await self._agents.update(agent)
+
+
+async def _notify_agent(agent_id: str, event: str, data: dict) -> None:
+    """Publica evento no Redis channel do agent (best-effort, não falha)."""
+    try:
+        from vms.core.config import get_settings
+        import redis.asyncio as aioredis
+
+        settings = get_settings()
+        client = aioredis.from_url(settings.redis_url)
+        payload = json.dumps({"event": event, **data})
+        await client.publish(f"agent:{agent_id}:config", payload)
+        await client.aclose()
+    except Exception as exc:
+        logger.warning("Falha ao notificar agent %s: %s", agent_id, exc)

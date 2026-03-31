@@ -1,7 +1,10 @@
 """Cliente HTTP para comunicação com a VMS API Cloud."""
 from __future__ import annotations
 
+import asyncio
+import json
 import logging
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -120,6 +123,35 @@ class CloudClient:
             logger.debug("Heartbeat enviado: %s", status)
         except httpx.HTTPError as exc:
             logger.warning("Falha ao enviar heartbeat: %s", exc)
+
+    async def listen_for_config_push(self, on_update: Callable[[dict], Any]) -> None:
+        """
+        Conecta ao WebSocket e recebe config push em tempo real.
+
+        Reconecta automaticamente se a conexão cair.
+        Chama on_update(event_data) para cada evento recebido.
+        """
+        import websockets
+
+        ws_url = self._base_url.replace("http://", "ws://").replace("https://", "wss://")
+        ws_url = f"{ws_url}/api/v1/agents/me/ws?api_key={self._settings.agent_api_key}"
+        backoff = 1.0
+
+        while True:
+            try:
+                async with websockets.connect(ws_url) as ws:
+                    logger.info("WebSocket conectado — aguardando config push")
+                    backoff = 1.0
+                    async for message in ws:
+                        try:
+                            data = json.loads(message)
+                            await on_update(data)
+                        except Exception as exc:
+                            logger.warning("Erro ao processar mensagem WS: %s", exc)
+            except Exception as exc:
+                logger.warning("WebSocket desconectado (%s) — reconectando em %ds", exc, backoff)
+                await asyncio.sleep(backoff)
+                backoff = min(backoff * 2, 60.0)
 
     def _ensure_client(self) -> httpx.AsyncClient:
         """Garante que o cliente está inicializado."""
