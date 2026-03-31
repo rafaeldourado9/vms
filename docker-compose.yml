@@ -1,0 +1,153 @@
+services:
+  # ─── Infraestrutura ──────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: vms
+      POSTGRES_USER: vms
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vmsdev}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vms -d vms"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks: [vms]
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    networks: [vms]
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-vms}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-vmsdev}
+    ports:
+      - "15672:15672"   # management UI (dev only)
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+    networks: [vms]
+
+  # ─── Streaming ────────────────────────────────────────────────────────────
+  mediamtx:
+    build: ./infra/mediamtx
+    ports:
+      - "8554:8554"   # RTSP
+      - "1935:1935"   # RTMP
+      - "8888:8888"   # HLS
+      - "8889:8889"   # WebRTC
+    volumes:
+      - ./infra/mediamtx/mediamtx.yml:/mediamtx.yml:ro
+      - recordings:/recordings
+    networks: [vms]
+
+  # ─── API Service ──────────────────────────────────────────────────────────
+  api:
+    build:
+      context: ./api
+      target: production
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://vms:${POSTGRES_PASSWORD:-vmsdev}@postgres:5432/vms
+      - REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-vms}:${RABBITMQ_PASSWORD:-vmsdev}@rabbitmq:5672/
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-change-in-prod}
+      - MEDIAMTX_API_URL=http://mediamtx:9997
+      - MEDIAMTX_RTMP_URL=rtmp://mediamtx:1935
+      - ANALYTICS_API_KEY=${ANALYTICS_API_KEY:-dev-analytics-key}
+      - RECORDINGS_PATH=/recordings
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - ENVIRONMENT=${ENVIRONMENT:-production}
+    volumes:
+      - recordings:/recordings
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [vms]
+
+  # ─── Worker (ARQ background tasks) ────────────────────────────────────────
+  worker:
+    build:
+      context: ./api
+      target: production
+    command: python -m arq vms.worker.WorkerSettings
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://vms:${POSTGRES_PASSWORD:-vmsdev}@postgres:5432/vms
+      - REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-vms}:${RABBITMQ_PASSWORD:-vmsdev}@rabbitmq:5672/
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-change-in-prod}
+      - RECORDINGS_PATH=/recordings
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - recordings:/recordings
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks: [vms]
+
+  # ─── Analytics Service ────────────────────────────────────────────────────
+  analytics:
+    build:
+      context: ./analytics
+      target: production
+    environment:
+      - VMS_API_URL=http://api:8000
+      - VMS_ANALYTICS_API_KEY=${ANALYTICS_API_KEY:-dev-analytics-key}
+      - REDIS_URL=redis://redis:6379/1
+      - MEDIAMTX_API_URL=http://mediamtx:9997
+      - ANALYTICS_FPS=${ANALYTICS_FPS:-1}
+      - ANALYTICS_WORKERS=${ANALYTICS_WORKERS:-4}
+      - YOLO_IMGSZ=${YOLO_IMGSZ:-640}
+      - YOLO_CONF=${YOLO_CONF:-0.30}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - recordings:/recordings
+      - ./models:/models:ro   # modelos YOLO pré-treinados
+    depends_on:
+      api:
+        condition: service_healthy
+    networks: [vms]
+
+  # ─── Nginx ────────────────────────────────────────────────────────────────
+  nginx:
+    image: nginx:1.25-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./infra/nginx/certs:/etc/nginx/certs:ro
+      - recordings:/recordings:ro
+    depends_on:
+      - api
+    networks: [vms]
+
+volumes:
+  pgdata:
+  recordings:
+
+networks:
+  vms:
+    driver: bridge
