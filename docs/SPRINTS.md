@@ -504,9 +504,9 @@ react-hot-toast                — notificações toast
 
 #### Checklist setup
 
-- [ ] `frontend/package.json` — dependências acima
-- [ ] `frontend/vite.config.ts` — alias `@/` → `src/`, proxy `/api` e `/webhooks` para `localhost:8000`
-- [ ] `frontend/tailwind.config.ts` — cores customizadas referenciando CSS vars:
+- [x] `frontend/package.json` — dependências acima
+- [x] `frontend/vite.config.ts` — alias `@/` → `src/`, proxy `/api` e `/webhooks` para `localhost:8000`
+- [x] `frontend/tailwind.config.ts` — cores customizadas referenciando CSS vars:
   ```js
   colors: {
     bg: 'var(--bg)', surface: 'var(--surface)', elevated: 'var(--elevated)',
@@ -515,8 +515,8 @@ react-hot-toast                — notificações toast
     success: 'var(--success)', warning: 'var(--warning)', danger: 'var(--danger)',
   }
   ```
-- [ ] `frontend/src/index.css` — CSS vars, `.btn`, `.btn-primary`, `.btn-ghost`, `.btn-danger`, `.card`, `.input`, `.label`, `.badge`, scrollbar, `animate-fade-in`, `animate-slide-in`
-- [ ] `frontend/Dockerfile` — multi-stage: build Vite → nginx:alpine serving `/dist`
+- [x] `frontend/src/index.css` — CSS vars, `.btn`, `.btn-primary`, `.btn-ghost`, `.btn-danger`, `.card`, `.input`, `.label`, `.badge`, scrollbar, `animate-fade-in`, `animate-slide-in`
+- [x] `frontend/Dockerfile` — multi-stage: build Vite → nginx:alpine serving `/dist`
 
 ---
 
@@ -524,43 +524,43 @@ react-hot-toast                — notificações toast
 
 #### UI Primitives (replicar do legado exatamente)
 
-- [ ] `components/ui/Modal.tsx` — props: `open`, `onClose`, `title`, `size` (sm/md/lg/xl/full), `footer`; Escape key; click fora fecha; animação slide-in
-- [ ] `components/ui/Badge.tsx` — props: `variant` (default/success/warning/danger/info), `dot`, `className`
-- [ ] `components/ui/Spinner.tsx` — `<Spinner />` inline + `<PageSpinner />` full-height centered
+- [x] `components/ui/Modal.tsx` — props: `open`, `onClose`, `title`, `size` (sm/md/lg/xl/full), `footer`; Escape key; click fora fecha; animação slide-in
+- [x] `components/ui/Badge.tsx` — props: `variant` (default/success/warning/danger/info), `dot`, `className`
+- [x] `components/ui/Spinner.tsx` — `<Spinner />` inline + `<PageSpinner />` full-height centered
 - [ ] `components/ui/Tooltip.tsx` — hover tooltip simples (usar `title` nativo como fallback)
-- [ ] `components/ui/Confirm.tsx` — modal de confirmação: "Tem certeza?" com btn-danger; hook `useConfirm()`
+- [x] `components/ui/Confirm.tsx` — modal de confirmação: "Tem certeza?" com btn-danger; hook `useConfirm()`
 
 #### Camera Components
 
-- [ ] `components/camera/VideoPlayer.tsx` — HLS.js + controles hover (play/pause, mute, fullscreen); overlay prop para canvas de detecção; camera name overlay top-left; estados: loading (spinner), error ("Sem sinal"), no-source; `lowLatencyMode: true`, `maxBufferLength: 10`
+- [x] `components/camera/VideoPlayer.tsx` — HLS.js + controles hover (play/pause, mute, fullscreen); overlay prop para canvas de detecção; camera name overlay top-left; estados: loading (spinner), error ("Sem sinal"), no-source; `lowLatencyMode: true`, `maxBufferLength: 10`
 - [ ] `components/camera/DetectionOverlay.tsx` — canvas sobreposto ao vídeo; recebe `detections: { bbox, label, confidence }[]`; re-escala bbox normalizada para pixels
-- [ ] `components/camera/CameraCard.tsx` — thumbnail (snapshot ou placeholder escuro); status dot (verde/vermelho); badge Online/Offline; badge "IA" se analytics ativos; protocolo (RTSP/RTMP/ONVIF); hover: botões Visualizar + Configurar
+- [x] `components/camera/CameraCard.tsx` — thumbnail (snapshot ou placeholder escuro); status dot (verde/vermelho); badge Online/Offline; badge "IA" se analytics ativos; protocolo (RTSP/RTMP/ONVIF); hover: botões Visualizar + Configurar
 
 #### Layout
 
-- [ ] `components/layout/Sidebar.tsx` — logo (dinâmico via themeStore); nav items com ícones Lucide; active state accent bg; colapsa para ícones em telas pequenas; logout no bottom
-- [ ] `components/layout/Header.tsx` — título da página atual; sino de notificações com contador badge; avatar + nome + role do usuário logado
-- [ ] `components/layout/Layout.tsx` — flex h-full: `<Sidebar>` + flex-col: `<Header>` + `<main>` overflow-auto px-6 py-5
+- [x] `components/layout/Sidebar.tsx` — logo (dinâmico via themeStore); nav items com ícones Lucide; active state accent bg; colapsa para ícones em telas pequenas; logout no bottom
+- [x] `components/layout/Header.tsx` — título da página atual; sino de notificações com contador badge; avatar + nome + role do usuário logado
+- [x] `components/layout/Layout.tsx` — flex h-full: `<Sidebar>` + flex-col: `<Header>` + `<main>` overflow-auto px-6 py-5
 
 #### Hooks base
 
-- [ ] `hooks/useSSE.ts` — conecta `GET /sse/events` com JWT; reconecta em caso de drop; retorna `{ lastEvent, connected }`
-- [ ] `hooks/usePermission.ts` — `isAdmin()`, `isOperator()`, `isViewer()` baseado no role do authStore
+- [x] `hooks/useSSE.ts` — conecta `GET /sse/events` com JWT; reconecta em caso de drop; retorna `{ lastEvent, connected }`
+- [x] `hooks/usePermission.ts` — `isAdmin()`, `isOperator()`, `isViewer()` baseado no role do authStore
 - [ ] `hooks/useTheme.ts` — aplica `--accent` e título da aba via themeStore; busca theme em `GET /api/v1/tenants/me/theme`
-- [ ] `hooks/useConfirm.ts` — retorna `confirm(message): Promise<boolean>` renderizando `<Confirm />`
+- [x] `hooks/useConfirm.ts` — retorna `confirm(message): Promise<boolean>` renderizando `<Confirm />`
 
 #### Services / API Client
 
-- [ ] `services/api.ts` — instância axios com `baseURL`, interceptor de auth (adiciona Bearer), interceptor de refresh (401 → refresh → retry)
-- [ ] `services/auth.ts` — `login()`, `refresh()`, `me()`
-- [ ] `services/cameras.ts` — `list()`, `get()`, `create()`, `update()`, `delete()`, `streamUrls()`, `snapshot()`, `rtmpConfig()`, `discover()`, `onvifProbe()`
-- [ ] `services/agents.ts` — `list()`, `create()`, `delete()`, `regenerateKey()`
-- [ ] `services/recordings.ts` — `listSegments()`, `timeline()`, `createClip()`, `getClip()`, `listClips()`, `downloadUrl()`
-- [ ] `services/events.ts` — `list()`, `get()` (com filtros: camera, tipo, placa, data)
-- [ ] `services/notifications.ts` — `listRules()`, `createRule()`, `updateRule()`, `deleteRule()`, `listLogs()`
-- [ ] `services/analytics.ts` — `listROIs()`, `createROI()`, `updateROI()`, `deleteROI()`, `roiEvents()`, `summary()`
+- [x] `services/api.ts` — instância axios com `baseURL`, interceptor de auth (adiciona Bearer), interceptor de refresh (401 → refresh → retry)
+- [x] `services/auth.ts` — `login()`, `refresh()`, `me()`
+- [x] `services/cameras.ts` — `list()`, `get()`, `create()`, `update()`, `delete()`, `streamUrls()`, `snapshot()`, `rtmpConfig()`, `discover()`, `onvifProbe()`
+- [x] `services/agents.ts` — `list()`, `create()`, `delete()`, `regenerateKey()`
+- [x] `services/recordings.ts` — `listSegments()`, `timeline()`, `createClip()`, `getClip()`, `listClips()`, `downloadUrl()`
+- [x] `services/events.ts` — `list()`, `get()` (com filtros: camera, tipo, placa, data)
+- [x] `services/notifications.ts` — `listRules()`, `createRule()`, `updateRule()`, `deleteRule()`, `listLogs()`
+- [x] `services/analytics.ts` — `listROIs()`, `createROI()`, `updateROI()`, `deleteROI()`, `roiEvents()`, `summary()`
 - [ ] `services/dashboard.ts` — `stats()`, `detectionsByHour()`
-- [ ] `services/iam.ts` — `listUsers()`, `createUser()`, `updateUser()`, `deactivateUser()`
+- [ ] `services/iam.ts` — `listUsers()`, `createUser()`, `updateUser()`, `deactivateUser()` (coberto por `services/users.ts`)
 
 ---
 
@@ -917,10 +917,10 @@ Left (hidden mobile):           Right:
 - Redirect para `/dashboard` após login bem-sucedido
 
 **Checklist:**
-- [ ] `pages/LoginPage.tsx`
-- [ ] `store/authStore.ts` — Zustand + persist em localStorage
-- [ ] `store/themeStore.ts` — accent var + logo + título
-- [ ] Interceptor axios refresh token (401 → refresh → retry → se falhar, logout)
+- [x] `pages/LoginPage.tsx`
+- [x] `store/authStore.ts` — Zustand + persist em localStorage
+- [x] `store/themeStore.ts` — accent var + logo + título
+- [x] Interceptor axios refresh token (401 → refresh → retry → se falhar, logout)
 
 ---
 
@@ -955,7 +955,7 @@ Left (hidden mobile):           Right:
    - Link "Ver todos →" para `/events`
 
 **Checklist:**
-- [ ] `pages/DashboardPage.tsx`
+- [x] `pages/DashboardPage.tsx`
 - [ ] SSE integration — `useSSE()` hook atualiza counters em tempo real
 - [ ] `services/dashboard.ts`
 
@@ -991,8 +991,8 @@ Left (hidden mobile):           Right:
 - Ações: Config (ícone) · Delete (admin only)
 
 **Checklist:**
-- [ ] `pages/CamerasPage.tsx`
-- [ ] `components/camera/CameraCard.tsx`
+- [x] `pages/CamerasPage.tsx`
+- [x] `components/camera/CameraCard.tsx`
 - [ ] SSE: camera.online/offline atualiza status dot sem reload
 
 ---
@@ -1047,8 +1047,8 @@ Left (hidden mobile):           Right:
 - Download button quando `ready`
 
 **Checklist:**
-- [ ] `pages/CameraDetailPage.tsx`
-- [ ] Protocol switcher (HLS↔WebRTC)
+- [x] `pages/CameraDetailPage.tsx`
+- [x] Protocol switcher (HLS↔WebRTC)
 - [ ] Snapshot modal
 
 ---
@@ -1085,9 +1085,9 @@ Left (hidden mobile):           Right:
 - Config específica por tipo aparece no painel direito
 
 **Checklist:**
-- [ ] `pages/ROIEditorPage.tsx`
-- [ ] Canvas com SVG overlay (polígonos interativos)
-- [ ] `hooks/useROIEditor.ts` — lógica de desenho/edição de polígono
+- [x] `pages/ROIEditorPage.tsx`
+- [x] Canvas com SVG overlay (polígonos interativos)
+- [ ] `hooks/useROIEditor.ts` — lógica de desenho/edição de polígono (inline na página)
 
 ---
 
@@ -1108,9 +1108,9 @@ Left (hidden mobile):           Right:
 - Drag-and-drop entre slots (v2)
 
 **Checklist:**
-- [ ] `pages/MosaicPage.tsx`
+- [x] `pages/MosaicPage.tsx`
 - [ ] Persist layout no localStorage
-- [ ] Fullscreen API
+- [x] Fullscreen API
 
 ---
 
@@ -1145,9 +1145,9 @@ Left (hidden mobile):           Right:
 - `GET /api/v1/cameras/{id}/timeline?date=2026-03-30` → segments agrupados por hora
 
 **Checklist:**
-- [ ] `pages/RecordingsPage.tsx`
+- [x] `pages/RecordingsPage.tsx`
 - [ ] `components/recordings/TimelineBar.tsx` — barra 24h com drag handles para clip range
-- [ ] Download de segmento individual
+- [x] Download de segmento individual
 
 ---
 
@@ -1175,8 +1175,8 @@ Left (hidden mobile):           Right:
 **Paginação:** cursor-based, botões Anterior/Próximo + "Página X de Y"
 
 **Checklist:**
-- [ ] `pages/EventsPage.tsx`
-- [ ] Modal de detalhe com thumbnail e payload
+- [x] `pages/EventsPage.tsx`
+- [x] Modal de detalhe com thumbnail e payload
 - [ ] Export CSV (blob download via axios)
 
 ---
@@ -1209,9 +1209,9 @@ Left (hidden mobile):           Right:
 - Células coloridas por densidade de detecções
 
 **Checklist:**
-- [ ] `pages/AnalyticsPage.tsx`
+- [x] `pages/AnalyticsPage.tsx`
 - [ ] Date range picker reutilizável `components/ui/DateRangePicker.tsx`
-- [ ] `services/analytics.ts` — summary + ROI events
+- [x] `services/analytics.ts` — summary + ROI events
 
 ---
 
@@ -1246,9 +1246,9 @@ Left (hidden mobile):           Right:
 - Botão "Revogar" com confirmação
 
 **Checklist:**
-- [ ] `pages/AgentsPage.tsx`
-- [ ] Modal de criação com exibição única da API key
-- [ ] Comando docker auto-gerado com variáveis
+- [x] `pages/AgentsPage.tsx`
+- [x] Modal de criação com exibição única da API key
+- [x] Comando docker auto-gerado com variáveis
 
 ---
 
@@ -1278,8 +1278,8 @@ Left (hidden mobile):           Right:
 - Retry manual em falhas
 
 **Checklist:**
-- [ ] `pages/NotificationsPage.tsx`
-- [ ] Gerador de segredo HMAC (crypto.randomBytes via `/api` ou frontend random)
+- [x] `pages/NotificationsPage.tsx`
+- [x] Gerador de segredo HMAC (crypto.randomBytes via `/api` ou frontend random)
 
 ---
 
@@ -1295,7 +1295,7 @@ Left (hidden mobile):           Right:
 - Reset de senha (gera nova senha temporária)
 
 **Checklist:**
-- [ ] `pages/UsersPage.tsx`
+- [x] `pages/UsersPage.tsx`
 
 ---
 
@@ -1325,18 +1325,18 @@ Left (hidden mobile):           Right:
 - Versão do VMS + backend + uptime
 
 **Checklist:**
-- [ ] `pages/SettingsPage.tsx`
-- [ ] Color picker com live preview de `--accent`
+- [x] `pages/SettingsPage.tsx`
+- [x] Color picker com live preview de `--accent`
 - [ ] Logo upload com preview + crop (ou simples URL)
 
 ---
 
 ### 9.5 Estado Global e SSE Real-time
 
-- [ ] `store/authStore.ts` — user, tokens, setAuth(), logout(), persist localStorage
-- [ ] `store/themeStore.ts` — theme, primaryColor(), side effects em CSS var + favicon + title
+- [x] `store/authStore.ts` — user, tokens, setAuth(), logout(), persist localStorage
+- [x] `store/themeStore.ts` — theme, primaryColor(), side effects em CSS var + favicon + title
 - [ ] `store/cameraStore.ts` — cache de status cameras (online/offline) atualizado via SSE
-- [ ] `hooks/useSSE.ts` — implementação:
+- [x] `hooks/useSSE.ts` — implementação:
   ```ts
   // Conecta /sse/events com JWT
   // EventSource nativo (ou polyfill se necessário)
@@ -1367,10 +1367,10 @@ Left (hidden mobile):           Right:
 
 ### 9.7 Build & Integração Docker
 
-- [ ] `frontend/Dockerfile` — multi-stage: `node:20-alpine` build → `nginx:1.25-alpine` serve
+- [x] `frontend/Dockerfile` — multi-stage: `node:20-alpine` build → `nginx:1.25-alpine` serve
 - [ ] `infra/nginx/nginx.conf` — adicionar `location /` serving frontend, SPA fallback `try_files $uri /index.html`
 - [ ] `docker-compose.yml` — adicionar serviço `frontend` (build + nginx) ou servir o dist via nginx existente
-- [ ] Vite proxy em dev: `/api` → `localhost:8000`, sem CORS issues
+- [x] Vite proxy em dev: `/api` → `localhost:8000`, sem CORS issues
 - [ ] `make dev-fe` — `vite dev` com hot reload
 - [ ] `make build-fe` — `vite build` + verifica bundle size
 
