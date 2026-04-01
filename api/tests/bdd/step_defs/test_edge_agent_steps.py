@@ -115,6 +115,7 @@ def create_camera(bdd_session_factory, ctx, name, rtsp_url):
                 rtsp_url=rtsp_url,
                 manufacturer="generic",
                 is_active=True,
+                agent_id=ctx.get("agent_id"),
             )
             session.add(camera)
             await session.commit()

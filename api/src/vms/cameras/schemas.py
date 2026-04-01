@@ -32,8 +32,6 @@ class CreateCameraRequest(BaseModel):
         if self.stream_protocol == StreamProtocol.RTSP_PULL:
             if not self.rtsp_url:
                 raise ValueError("rtsp_url é obrigatório para stream_protocol=rtsp_pull")
-            if not self.agent_id:
-                raise ValueError("agent_id é obrigatório para stream_protocol=rtsp_pull")
         elif self.stream_protocol == StreamProtocol.ONVIF:
             if not self.onvif_url:
                 raise ValueError("onvif_url é obrigatório para stream_protocol=onvif")

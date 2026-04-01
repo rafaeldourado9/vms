@@ -33,14 +33,17 @@ class TestListenForConfigPush:
 
         message = json.dumps({"event": "config_updated", "camera_id": "c1"})
 
+        async def _async_iter(messages):
+            for m in messages:
+                yield m
+
         # Simula websocket que envia 1 mensagem e fecha
         mock_ws = AsyncMock()
         mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
         mock_ws.__aexit__ = AsyncMock(return_value=None)
-        mock_ws.__aiter__ = MagicMock(return_value=iter([message]))
+        mock_ws.__aiter__ = lambda self_: _async_iter([message])
 
         with patch("websockets.connect", return_value=mock_ws):
-            # Cancela após primeira iteração para não loop infinito
             task = asyncio.create_task(client.listen_for_config_push(fake_on_update))
             await asyncio.sleep(0.05)
             task.cancel()
@@ -84,10 +87,14 @@ class TestListenForConfigPush:
         async def fake_on_update(data: dict) -> None:
             received.append(data)
 
+        async def _async_iter(messages):
+            for m in messages:
+                yield m
+
         mock_ws = AsyncMock()
         mock_ws.__aenter__ = AsyncMock(return_value=mock_ws)
         mock_ws.__aexit__ = AsyncMock(return_value=None)
-        mock_ws.__aiter__ = MagicMock(return_value=iter(["not-json", '{"event": "ok"}']))
+        mock_ws.__aiter__ = lambda self_: _async_iter(["not-json", '{"event": "ok"}'])
 
         with patch("websockets.connect", return_value=mock_ws):
             task = asyncio.create_task(client.listen_for_config_push(fake_on_update))
