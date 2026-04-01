@@ -1356,7 +1356,7 @@ Left (hidden mobile):           Right:
 - [x] `tests/unit/components/AddCameraWizard.test.tsx` — navegação de passos, validação
 - [x] `tests/unit/components/OnboardingWizard.test.tsx` — trigger, progresso, skip
 - [x] `tests/unit/hooks/useSSE.test.ts` — connect, event handling, reconnect
-- [ ] `tests/unit/services/api.test.ts` — interceptors, refresh
+- [x] `tests/unit/services/api.test.ts` — interceptors, refresh
 - [ ] `tests/e2e/` (Playwright — pós-MVP):
   - Login + redirect
   - Criar câmera via wizard
