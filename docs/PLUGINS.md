@@ -6,19 +6,47 @@
 
 ## Conceito
 
-Qualquer câmera bullet envia stream RTSP → MediaMTX captura → analytics_service
-extrai 1 frame/segundo → plugin processa → evento publicado no VMS.
+Os plugins analytics operam em dois modos, dependendo do tipo de análise:
+
+### Modo 1 — Pós-gravação (padrão — câmeras bullet)
+
+Câmeras sem IA embarcada gravam normalmente via MediaMTX (encoder da câmera, -c copy).
+Ao finalizar cada segmento de 60s, uma ARQ task extrai os frames do .mp4 e
+envia para os plugins relevantes.
 
 ```
-Câmera RTSP → MediaMTX → analytics_service
-                              ├── intrusion_detection
+Câmera bullet → MediaMTX (grava .mp4 60s)
+                    │  segment_complete hook
+                    ▼
+              ARQ: index_segment()
+                    │
+                    └── ARQ: analytics_segment(segment_id)
+                              │  ffmpeg extrai frames do .mp4
+                              ▼
+                        PluginOrchestrator
                               ├── people_count
                               ├── vehicle_count
-                              └── lpr (plate recognition)
-                                      ↓
-                              POST /internal/analytics/ingest/
-                                      ↓
-                              VmsEvent criado + publicado
+                              └── lpr
+                                    ↓
+                        POST /internal/analytics/ingest/
+                                    ↓
+                        VmsEvent criado + publicado
+```
+
+**Latência:** ~60-120s após a gravação do segmento.
+**Vantagem:** frames completos (sem drops de rede), retry natural via ARQ, sem RTSP aberto.
+
+### Modo 2 — Real-time (somente intrusion, opt-in por ROI)
+
+Câmeras com ROI de `ia_type=intrusion` ativo: o analytics service mantém
+conexão RTSP 1fps diretamente no MediaMTX para alerta imediato.
+Configurado por câmera — não habilitado por padrão.
+
+```
+MediaMTX RTSP → analytics_service (1fps, somente câmeras com ROI intrusion ativo)
+                      │  YOLOv8 + polígono ROI
+                      ▼
+              POST /internal/analytics/ingest/  (alerta < 2s)
 ```
 
 ---
@@ -302,8 +330,14 @@ async def test_exception_na_inferencia_nao_propaga(): ...
 
 ## Performance (200 câmeras)
 
-- 1 fps/câmera × 200 câmeras = 200 frames/s total
-- YOLOv8n no CPU: ~30ms/frame (imgsz=640)
-- 4 workers analytics = 50 frames/s cada = buffer adequado
-- Configurável: `ANALYTICS_FPS`, `ANALYTICS_WORKERS`
-- GPU opcional: com RTX 4060, throughput ~10× maior
+### Modo pós-gravação (padrão)
+- 200 câmeras × 1 segmento/min = 200 tasks ARQ/min
+- Cada task: ffmpeg extrai frames 1fps de 60s = 60 frames
+- YOLOv8n no CPU: ~30ms/frame → 60 frames × 30ms = ~2s por segmento
+- 4 workers ARQ processam 200 câmeras com folga (headroom > 3×)
+- GPU opcional mas desnecessária para este modo
+
+### Modo real-time (somente intrusion)
+- Limitado às câmeras com ROI intrusion configurado
+- 1 fps/câmera — recomendado máx 20-30 câmeras em modo real-time por worker
+- GPU recomendada se > 50 câmeras em real-time simultâneo

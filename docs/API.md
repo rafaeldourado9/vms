@@ -102,9 +102,72 @@ Lista câmeras do tenant. Filtros: `is_online`, `agent_id`.
 }
 ```
 
+**Response 201:**
+```json
+{
+  "id": "uuid",
+  "name": "...",
+  "ptz_supported": false,
+  "retention_days": 7,
+  "retention_days_pending": null,
+  "retention_pending_from": null,
+  "...": "demais campos"
+}
+```
+
 ### GET /api/v1/cameras/{id}
 ### PATCH /api/v1/cameras/{id}
 ### DELETE /api/v1/cameras/{id}
+
+### GET /api/v1/cameras/{id}/stream-urls
+Retorna URLs HLS/WebRTC assinadas para viewer ao vivo.
+
+**Response 200:**
+```json
+{
+  "hls_url": "http://mediamtx:8888/tenant-X/cam-Y/index.m3u8?token=jwt",
+  "webrtc_url": "http://mediamtx:8889/tenant-X/cam-Y/whep?token=jwt",
+  "rtsp_url": "rtsp://mediamtx:8554/tenant-X/cam-Y?token=jwt",
+  "token": "eyJ...",
+  "expires_at": "2026-04-01T15:15:00Z"
+}
+```
+
+### GET /api/v1/cameras/{id}/vod *(novo — Sprint 3.5)*
+Retorna URL HLS VOD para playback de gravações via timeline.
+
+**Query params:** `from=2026-04-01T14:00:00Z` `to=2026-04-01T15:00:00Z`
+
+**Response 200:**
+```json
+{
+  "hls_url": "http://mediamtx:8888/recording/tenant-X/cam-Y/index.m3u8?...",
+  "token": "eyJ...",
+  "expires_at": "2026-04-01T15:15:00Z",
+  "segments_count": 60,
+  "has_gaps": false
+}
+```
+
+### GET /api/v1/cameras/{id}/timeline *(atualizado — Sprint 3.5)*
+Heat map de horas com gravação disponível.
+
+**Query params:** `date=2026-04-01` (YYYY-MM-DD, obrigatório)
+
+**Response 200:**
+```json
+{
+  "date": "2026-04-01",
+  "camera_id": "uuid",
+  "hours": {
+    "0": 60, "1": 60, "2": 60,
+    "14": 58, "15": 60,
+    "23": 43
+  },
+  "total_minutes": 1380
+}
+```
+*Valores: minutos gravados na hora (0-60). Horas ausentes = sem gravação.*
 
 ---
 
@@ -159,6 +222,55 @@ Revoga API key do agent (irreversível).
 
 ---
 
+## PTZ — Pan-Tilt-Zoom
+
+> Disponível somente para câmeras com `stream_protocol=onvif` e `ptz_supported=true`.
+> Habilitar via `PATCH /cameras/{id}` com `{ "ptz_supported": true }`.
+
+### POST /api/v1/cameras/{id}/ptz/move
+Move câmera (contínuo). Para com `/ptz/stop` ou após `timeout_seconds`.
+
+```json
+{ "pan": 0.5, "tilt": 0.0, "zoom": 0.0, "timeout_seconds": 5 }
+```
+*Valores: pan/tilt -1.0 a 1.0, zoom 0.0 a 1.0.*
+
+**Response 200:** `{ "ok": true, "message": "Movimento iniciado" }`
+
+### POST /api/v1/cameras/{id}/ptz/stop
+Para qualquer movimento PTZ em curso.
+
+**Response 200:** `{ "ok": true, "message": "Movimento parado" }`
+
+### GET /api/v1/cameras/{id}/ptz/presets
+Lista presets PTZ salvos na câmera.
+
+**Response 200:**
+```json
+{
+  "presets": [
+    { "token": "1", "name": "Entrada" },
+    { "token": "2", "name": "Pátio" }
+  ]
+}
+```
+
+### POST /api/v1/cameras/{id}/ptz/presets/{token}/goto
+Move câmera para o preset.
+
+**Response 200:** `{ "ok": true, "message": "Movendo para preset '1'" }`
+
+### POST /api/v1/cameras/{id}/ptz/presets/{token}/save
+Salva posição atual como preset. Use `"new"` como token para criar.
+
+```json
+{ "name": "Portaria Frente" }
+```
+
+**Response 200:** `{ "token": "3", "name": "Portaria Frente" }`
+
+---
+
 ## Gravações
 
 ### GET /api/v1/recordings
@@ -189,6 +301,15 @@ Lista segmentos. Filtros: `camera_id`, `started_after`, `started_before`.
   "ends_at": "2026-03-30T12:05:00Z",
   "vms_event_id": "uuid"
 }
+```
+
+### GET /api/v1/recordings/{id}/download
+Redirect 302 para URL assinada do arquivo .mp4.
+
+### GET /api/v1/recordings/clips/{id}
+Status do clip (polling para UI saber quando ficou pronto).
+```json
+{ "id": "uuid", "status": "ready", "file_path": "/clips/..." }
 ```
 
 ---

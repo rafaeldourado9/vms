@@ -186,20 +186,46 @@ docker compose up -d --build
 - [ ] Agent configurado e online
 - [ ] Câmera de teste aparece online
 - [ ] Gravação de teste aparece em /api/v1/recordings
+- [ ] Timeline retorna heat map correto
+- [ ] VOD playback funciona (HLS.js scrubbing)
 - [ ] Webhook de notificação testado
+- [ ] PTZ funciona (se câmera ONVIF com suporte)
 
 ---
 
 ## Estimativas de Capacidade (por instância)
 
-| Câmeras | RAM API | RAM Analytics | Disco/dia | Banda upload |
-|---------|---------|---------------|-----------|-------------|
-| 10      | 512MB   | 2GB           | 100GB     | 20Mbps      |
-| 50      | 1GB     | 4GB           | 500GB     | 100Mbps     |
-| 100     | 2GB     | 6GB           | 1TB       | 200Mbps     |
-| 200     | 4GB     | 8GB (GPU rec) | 2TB       | 400Mbps     |
+### Armazenamento (por câmera, por dia)
 
-*Baseado em: 1080p H.264, bitrate médio 2Mbps, retenção 7 dias*
+| Codec  | Bitrate   | Armazenamento/câmera/dia |
+|--------|-----------|--------------------------|
+| H.264  | ~500 kbps | ~5.4 GB                  |
+| H.265  | ~250 kbps | ~2.7 GB  ← recomendado   |
+| H.265  | ~150 kbps | ~1.6 GB  (qualidade mín) |
+
+> O VMS usa `-c copy` — bitrate depende do encoder da câmera.
+> Configure H.265 nas câmeras para maximizar retenção pelo mesmo custo de disco.
+
+### Armazenamento total
+
+| Câmeras | Retenção | H.264  | H.265  |
+|---------|----------|--------|--------|
+| 50      | 7 dias   | 1.9 TB | 950 GB |
+| 100     | 7 dias   | 3.8 TB | 1.9 TB |
+| 200     | 7 dias   | 7.5 TB | 3.8 TB |
+| 200     | 15 dias  | 16 TB  | 8 TB   |
+
+### Recursos computacionais
+
+| Câmeras | RAM API | RAM Analytics | CPU Analytics | GPU       |
+|---------|---------|---------------|---------------|-----------|
+| 10      | 512MB   | 1GB           | 1 core        | opcional  |
+| 50      | 1GB     | 2GB           | 2 cores       | opcional  |
+| 100     | 2GB     | 4GB           | 4 cores       | opcional  |
+| 200     | 4GB     | 6GB           | 4 cores       | opcional* |
+
+*GPU recomendada apenas se > 50 câmeras com ROI intrusion em modo real-time.*
+*Analytics pós-gravação (padrão): CPU é suficiente.*
 
 ---
 
@@ -211,9 +237,18 @@ docker compose up -d --build
 - Logs: `docker compose logs mediamtx`
 
 ### Analytics não processa câmeras
+- Modo pós-gravação: verificar se ARQ worker está rodando (`docker compose logs worker`)
+- Verificar se `segment_ready` webhook está configurado no mediamtx.yml
 - Verificar `ANALYTICS_API_KEY` igual nos dois serviços
-- Checar ROIs configuradas no banco
+- Checar ROIs configuradas: `GET /api/v1/analytics/rois`
+- Modo real-time (intrusion): verificar ROIs com `ia_type=intrusion` e `is_active=true`
 - Logs: `docker compose logs analytics`
+
+### VOD / Timeline não funciona
+- Verificar se MediaMTX tem recording habilitado no mediamtx.yml
+- Verificar se `/mnt/recordings` está acessível pelo MediaMTX e pelo Nginx
+- Verificar se segments aparecem em `GET /api/v1/recordings?camera_id=<id>`
+- Nginx: checar se /recordings/ tem auth_request configurado
 
 ### Gravações não aparecem
 - Verificar permissão em `/mnt/recordings`

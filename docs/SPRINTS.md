@@ -197,6 +197,44 @@
 
 ---
 
+## Sprint 3.5 — VOD Timeline & Retention Management [pendente]
+
+### 3.5.1 VOD Playback via MediaMTX
+
+> MediaMTX já tem API de recording/playback built-in.
+> VMS precisa apenas proxiar com autenticação.
+
+- [ ] `GET /api/v1/cameras/{id}/vod` — proxy para MediaMTX recording API
+  - Query params: `from=ISO8601&to=ISO8601`
+  - VMS valida ViewerToken, chama MediaMTX GET /recording/get, retorna HLS URL autenticada
+  - Nginx serve /recordings/ com auth_request JWT (já configurado no Sprint 8)
+- [ ] `GET /api/v1/cameras/{id}/timeline` — heat map de horas com gravação
+  - Retorna `{ "2026-04-01": { "14": 60, "15": 58, "16": 60, ... } }` (minutos gravados por hora)
+  - Query do RecordingSegment no DB agrupado por hora
+
+### 3.5.2 Retenção Pendente
+
+> Ao fazer upgrade de retenção (ex: 5→15 dias), o novo prazo
+> só entra em vigor ao fim do ciclo atual para não onerar storage de surpresa.
+
+- [ ] Adicionar `retention_days_pending: int | None` à Camera (domain + model + schema)
+- [ ] Adicionar `retention_pending_from: datetime | None` à Camera
+- [ ] Migration `005_retention_pending.py` (renumerar se necessário)
+- [ ] `cameras/service.py` — lógica de upgrade/downgrade:
+  - Upgrade: seta pending, `retention_pending_from = now() + retention_days_atuais dias`
+  - Downgrade: aplica imediatamente, limpa pending
+- [ ] ARQ task `apply_pending_retention()` — roda diariamente, aplica pendentes vencidos
+
+### 3.5.3 Testes
+
+- [ ] `tests/unit/cameras/test_retention_pending.py` — lógica upgrade/downgrade
+- [ ] `tests/integration/test_vod.py` — endpoint VOD com mock MediaMTX
+- [ ] `tests/unit/recordings/test_apply_pending_retention.py` — ARQ task
+
+**Critério de aceite:** Frontend consegue scrubbing de 1h de gravação sem buffering; upgrade 5→15 dias não expande storage imediatamente
+
+---
+
 ## Sprint 4 — Events & ALPR [2026-04-01] ✅
 
 ### 4.1 Events (Bounded Context)
@@ -332,7 +370,10 @@
 - [x] `analytics/src/analytics/core/plugin_base.py` — AnalyticsPlugin ABC
 - [x] `analytics/src/analytics/core/yolo_base.py` — YOLOPlugin base
 - [x] `analytics/src/analytics/core/orchestrator.py` — frame capture + plugin routing
-- [x] `analytics/src/analytics/core/frame_source.py` — OpenCV RTSP reader (1fps)
+- [x] `analytics/src/analytics/core/frame_source.py` — OpenCV RTSP reader (1fps) — usado SOMENTE para intrusion real-time
+- [ ] `analytics/src/analytics/core/segment_processor.py` — lê .mp4 do disco, extrai frames via ffmpeg, envia para plugins
+- [ ] ARQ task `analytics_segment(segment_id)` — disparada após index_segment()
+- [ ] `analytics/src/analytics/core/orchestrator.py` — modo dual: pós-gravação (padrão) vs real-time (somente intrusion)
 - [x] `analytics/src/analytics/core/vms_client.py` — HTTP client para VMS API
 - [x] `analytics/src/analytics/core/config.py` — settings
 - [x] `analytics/src/analytics/main.py` — FastAPI app + lifespan
@@ -420,6 +461,7 @@
 ### Frontend
 - [ ] Dashboard câmeras (grid live view HLS/WebRTC)
 - [ ] Timeline de gravações com playback
+- [ ] Timeline de gravações com scrubbing via HLS.js (VOD MediaMTX)
 - [ ] Mapa de câmeras
 - [ ] Eventos e alertas em tempo real (SSE consumer)
 - [ ] Gestão de ROIs com editor de polígono
@@ -443,7 +485,9 @@
 Sprint 0  ██████████░░  ✅ Estrutura + Docs (infra configs pendentes)
 Sprint 1  ████████████  ✅ IAM + Foundation (51 testes)
 Sprint 2  ████████░░░░  ✅ Cameras + Agents | ░ ONVIF + multi-protocol
+Sprint 2.5 ████████████  ✅ PTZ & ONVIF Avançado (14 testes)
 Sprint 3  ████████░░░░  ✅ Streaming + Recordings | ░ viewer auth + RTMP push + download
+Sprint 3.5 ░░░░░░░░░░░░  ☐ VOD Timeline + Retention Pending
 Sprint 4  ████████████  ✅ Events + ALPR (42 testes + 3 BDD)
 Sprint 5  ████████████  ✅ Notifications + Event Bus + SSE + Health
 Sprint 6  ████████░░░░  ✅ Edge Agent | ░ WebSocket push + STUN/TURN docs

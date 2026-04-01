@@ -116,6 +116,10 @@ MediaMTX :1935                   ← roda no VMS (cloud ou on-prem)
   └── Record /recordings/...
 ```
 
+> O agent usa `ffmpeg -c copy` — sem re-encode, sem perda de qualidade.
+> A qualidade de gravação é a qualidade do encoder da câmera.
+> H.265: recomendado para câmeras que suportam (metade do storage vs H.264).
+
 **Quando usar:** câmeras IP comuns (Hikvision, Intelbras, Dahua, genéricas) que não têm RTMP nativo. Requer um servidor com Docker na rede local do cliente.
 
 **Configuração no VMS:**
@@ -259,6 +263,9 @@ Camera
 ├── onvif_password (str?)            ← encrypted at rest
 ├── manufacturer (enum: hikvision, intelbras, dahua, generic)
 ├── retention_days (int, default=7)
+├── ptz_supported (bool, default=False)         ← adicionado Sprint 2.5
+├── retention_days_pending (int?)               ← para upgrade de plano
+├── retention_pending_from (datetime?)          ← quando aplicar o pending
 ├── is_active (bool)
 ├── is_online (bool, default=False)
 ├── last_seen_at (datetime?)
@@ -388,19 +395,27 @@ Redis dedup: SET alpr:dedup:{camera}:{plate} NX EX 60
 VmsEvent.create() → publish "alpr.detected" → SSE + Notifications
 ```
 
-### Fluxo B — Analytics server-side (câmera burra)
+### Fluxo B — Analytics server-side pós-gravação (câmera bullet)
 ```
 Câmera RTSP (qualquer) → MediaMTX
-  │  frame capture 1fps
+  │  grava segmentos 60s (.mp4, encoder original da câmera, -c copy)
   ▼
-Analytics Service (plugin lpr)
-  │  YOLOv8 detect + fast-plate-ocr
-  ▼
-POST /internal/analytics/ingest/
+segment_complete hook → ARQ: index_segment()
   │
-  ▼
-EventService.ingest_alpr() → (mesmo fluxo acima a partir de dedup)
+  └── ARQ: analytics_segment(segment_id)  ← novo
+        │  lê .mp4 do disco (ffmpeg extrai frames)
+        ▼
+  Analytics Service (plugin lpr)
+        │  YOLOv8 detect + fast-plate-ocr
+        ▼
+  POST /internal/analytics/ingest/
+        │
+        ▼
+  EventService.ingest_alpr() → (mesmo fluxo A a partir de dedup)
 ```
+
+Latência: ~60-120s após gravação do segmento (aceitável para ALPR/contagens)
+Vantagem: sem conexão RTSP aberta, frames completos sem drops, retry gratuito via ARQ
 
 ### Fluxo C — Câmera RTMP push com LPR nativo (futuro)
 ```
@@ -431,6 +446,28 @@ Câmera → [Agent ffmpeg -c copy] → MediaMTX
                                      ▼
                            Retention check → delete segments > retention_days
 ```
+
+---
+
+## 7.1 VOD / Timeline Playback
+
+MediaMTX já possui API de recording/playback built-in.
+O VMS não reimplementa geração de playlist — apenas proxia com autenticação.
+
+```
+Frontend HLS.js
+  │
+  ├── 1. GET /api/v1/cameras/{id}/timeline?date=2026-04-01
+  │        → heat map do DB: { "14": 60, "15": 58 }  (minutos gravados por hora)
+  │
+  └── 2. GET /api/v1/cameras/{id}/vod?from=T&to=T
+           → VMS valida ViewerToken
+           → chama MediaMTX GET /recording/get?path=tenant-X/cam-Y&start=T&duration=N
+           → MediaMTX gera HLS playlist dinâmica dos .mp4 existentes
+           → VMS injeta token de auth → HLS.js reproduz + scrubbing
+```
+
+Segmentos servidos: Nginx /recordings/ com auth_request JWT (já configurado)
 
 ---
 
@@ -485,7 +522,9 @@ Frontend      | React 18 + Vite + TW    | SPA dark-mode, HLS.js, Recharts
 
 - 200 câmeras × 60s segments = 200 writes/min no banco (trivial)
 - 200 streams RTSP simultâneos no MediaMTX (testado até 300+)
-- Analytics: 1fps × 200 câmeras = 200 frames/s (4 workers YOLO, ~50fps/worker)
+- Analytics pós-gravação: processa 60s de segmento em ~5s (YOLOv8n CPU, 1fps extraído)
+  200 câmeras × 1 segmento/min = 200 tasks/min → 4 workers ARQ são suficientes
+- Analytics real-time (somente intrusão): 1fps × N câmeras configuradas com ROI intrusion
 - Redis: ALPR dedup TTL keys — negligível
 - PostgreSQL: índices em `(tenant_id, camera_id)`, `(tenant_id, occurred_at)`
 - Horizontal: múltiplos workers ARQ, múltiplos uvicorn workers
