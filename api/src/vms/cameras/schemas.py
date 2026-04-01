@@ -72,6 +72,8 @@ class CameraResponse(BaseModel):
     manufacturer: str
     retention_days: int
     ptz_supported: bool
+    retention_days_pending: int | None
+    retention_pending_from: datetime | None
     is_active: bool
     is_online: bool
     agent_id: str | None

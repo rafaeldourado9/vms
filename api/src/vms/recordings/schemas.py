@@ -103,3 +103,28 @@ class TimelineHourResponse(BaseModel):
     hour: datetime
     segments: list[RecordingSegmentResponse]
     coverage_pct: float
+    minutes_recorded: int = Field(default=0, description="Minutos gravados na hora (0-60)")
+
+    @classmethod
+    def from_segments(
+        cls, hour: datetime, segments: list[RecordingSegmentResponse]
+    ) -> "TimelineHourResponse":
+        """Constrói resposta calculando coverage e minutos a partir dos segmentos."""
+        total_duration = sum(s.duration_seconds for s in segments)
+        coverage_pct = min(total_duration / 3600.0, 1.0)
+        return cls(
+            hour=hour,
+            segments=segments,
+            coverage_pct=round(coverage_pct, 4),
+            minutes_recorded=min(int(total_duration / 60), 60),
+        )
+
+
+class VodResponse(BaseModel):
+    """URL HLS VOD para playback de gravações via MediaMTX."""
+
+    hls_url: str = Field(..., description="URL HLS VOD — alimentar diretamente no HLS.js")
+    token: str = Field(..., description="ViewerToken JWT incluído na URL")
+    expires_at: datetime = Field(..., description="Expiração do ViewerToken")
+    segments_count: int = Field(..., description="Número de segmentos encontrados no período")
+    has_gaps: bool = Field(..., description="True se houver gaps de gravação no período")

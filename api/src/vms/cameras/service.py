@@ -136,7 +136,7 @@ class CameraService:
         if location is not None:
             camera.location = location
         if retention_days is not None:
-            camera.retention_days = retention_days
+            _apply_retention_change(camera, retention_days)
         if agent_id is not None:
             camera.agent_id = agent_id
         if ptz_supported is not None:
@@ -271,6 +271,30 @@ class AgentService:
         agent = await self.get_agent(agent_id, tenant_id)
         agent.mark_offline()
         await self._agents.update(agent)
+
+
+def _apply_retention_change(camera: Camera, new_days: int) -> None:
+    """
+    Aplica mudança de retenção com regra de upgrade/downgrade.
+
+    - Upgrade (aumento): agenda para o fim do ciclo atual (retention_days_pending)
+    - Downgrade (redução): aplica imediatamente, limpa pending
+    - Igual: sem efeito
+    """
+    if new_days == camera.retention_days:
+        return
+
+    if new_days > camera.retention_days:
+        # Upgrade: só entra em vigor ao fim do ciclo atual
+        camera.retention_days_pending = new_days
+        camera.retention_pending_from = datetime.now(UTC) + timedelta(
+            days=camera.retention_days
+        )
+    else:
+        # Downgrade: aplica imediatamente e cancela qualquer pending
+        camera.retention_days = new_days
+        camera.retention_days_pending = None
+        camera.retention_pending_from = None
 
 
 async def _notify_agent(agent_id: str, event: str, data: dict) -> None:

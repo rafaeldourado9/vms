@@ -75,6 +75,10 @@ class CameraModel(Base):
     manufacturer: Mapped[str] = mapped_column(String(50), nullable=False, default="generic")
     retention_days: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
     ptz_supported: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    retention_days_pending: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    retention_pending_from: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_online: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     last_seen_at: Mapped[datetime | None] = mapped_column(

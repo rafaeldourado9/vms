@@ -1,10 +1,13 @@
 """Rotas HTTP do bounded context de gravações."""
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import UTC, datetime, timezone, timedelta
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 
+from vms.cameras.repository import CameraRepository
+from vms.cameras.service import CameraService
+from vms.core.config import get_settings
 from vms.core.deps import CurrentUser, DbSession
 from vms.recordings.repository import ClipRepository, RecordingSegmentRepository
 from vms.recordings.schemas import (
@@ -14,8 +17,11 @@ from vms.recordings.schemas import (
     RecordingSegmentResponse,
     SegmentListResponse,
     TimelineHourResponse,
+    VodResponse,
 )
 from vms.recordings.service import RecordingService
+from vms.iam.service import AuthService
+from vms.iam.repository import ApiKeyRepository as IamRepo
 
 router = APIRouter()
 
@@ -99,17 +105,92 @@ async def get_timeline(
 
     result = []
     for hour_dt, hour_segs in sorted(hours.items()):
-        total_duration = sum(s.duration_seconds for s in hour_segs)
-        coverage_pct = min(total_duration / 3600.0, 1.0)
-        result.append(
-            TimelineHourResponse(
-                hour=hour_dt,
-                segments=[RecordingSegmentResponse.model_validate(s) for s in hour_segs],
-                coverage_pct=round(coverage_pct, 4),
-            )
-        )
+        seg_responses = [RecordingSegmentResponse.model_validate(s) for s in hour_segs]
+        result.append(TimelineHourResponse.from_segments(hour_dt, seg_responses))
 
     return result
+
+
+# ─── VOD ─────────────────────────────────────────────────────────────────────
+
+@router.get(
+    "/cameras/{camera_id}/vod",
+    response_model=VodResponse,
+    summary="URL HLS VOD para playback de gravações",
+    tags=["recordings"],
+)
+async def get_vod_url(
+    camera_id: str,
+    claims: CurrentUser,
+    db: DbSession,
+    request: Request,
+    from_ts: datetime = Query(..., alias="from", description="Início do período (ISO 8601)"),
+    to_ts: datetime = Query(..., alias="to", description="Fim do período (ISO 8601)"),
+) -> VodResponse:
+    """
+    Retorna URL HLS VOD para playback via MediaMTX.
+
+    O frontend passa a URL diretamente para o HLS.js — o MediaMTX serve
+    os segmentos .mp4 gravados como playlist HLS dinâmica.
+    Gaps de gravação são indicados via `has_gaps=true`.
+    """
+    # 1. Valida câmera no tenant (isolamento multi-tenant)
+    camera_svc = CameraService(CameraRepository(db))
+    camera = await camera_svc.get_camera(camera_id, claims.tenant_id)
+
+    # 2. Segmentos no intervalo — para contar e detectar gaps
+    seg_repo = RecordingSegmentRepository(db)
+    segments, total = await seg_repo.list_by_camera(
+        tenant_id=claims.tenant_id,
+        camera_id=camera_id,
+        started_after=from_ts,
+        started_before=to_ts,
+        limit=10000,
+        offset=0,
+    )
+    if not segments:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Nenhuma gravação encontrada no período solicitado",
+        )
+
+    # 3. Detecta gaps (> 5s entre segmentos consecutivos)
+    sorted_segs = sorted(segments, key=lambda s: s.started_at)
+    has_gaps = any(
+        (sorted_segs[i].started_at - sorted_segs[i - 1].ended_at).total_seconds() > 5
+        for i in range(1, len(sorted_segs))
+    )
+
+    # 4. ViewerToken JWT (valida leitura no MediaMTX via read-auth hook)
+    auth_svc = AuthService(user_repo=None, api_key_repo=IamRepo(db))  # type: ignore[arg-type]
+    viewer_token = await auth_svc.issue_viewer_token(
+        tenant_id=claims.tenant_id, camera_id=camera_id
+    )
+
+    # 5. Constrói URL de recording do MediaMTX
+    #    Formato: http://HOST:8888/PATH/rec.m3u8?start=RFC3339&duration=SECS&token=JWT
+    mediamtx_host = request.headers.get("X-MediaMTX-Host", "localhost")
+    duration_seconds = max(1, int((to_ts - from_ts).total_seconds()))
+
+    # Normaliza timezone para UTC e formata como RFC3339
+    start_utc = from_ts.astimezone(UTC) if from_ts.tzinfo else from_ts.replace(tzinfo=UTC)
+    start_str = start_utc.strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    hls_url = (
+        f"http://{mediamtx_host}:8888/{camera.mediamtx_path}"
+        f"/rec.m3u8?start={start_str}&duration={duration_seconds}&token={viewer_token}"
+    )
+
+    settings = get_settings()
+    expires_at = datetime.now(UTC) + timedelta(minutes=settings.access_token_expire_minutes)
+
+    return VodResponse(
+        hls_url=hls_url,
+        token=viewer_token,
+        expires_at=expires_at,
+        segments_count=total,
+        has_gaps=has_gaps,
+    )
 
 
 # ─── Clipes ───────────────────────────────────────────────────────────────────

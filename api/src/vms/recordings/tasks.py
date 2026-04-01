@@ -55,6 +55,44 @@ async def task_index_segment(
             raise
 
 
+async def task_apply_pending_retention(ctx: dict) -> None:
+    """Aplica retention_days_pending para câmeras cujo ciclo atual terminou. Roda diariamente."""
+    from datetime import UTC, datetime
+    from vms.cameras.models import CameraModel
+    from sqlalchemy import select, update as sa_update
+
+    now = datetime.now(UTC)
+    factory = get_session_factory()
+    async with factory() as session:
+        try:
+            stmt = select(CameraModel).where(
+                CameraModel.retention_days_pending.is_not(None),
+                CameraModel.retention_pending_from <= now,
+            )
+            cameras = (await session.scalars(stmt)).all()
+
+            if cameras:
+                ids = [c.id for c in cameras]
+                upd = (
+                    sa_update(CameraModel)
+                    .where(CameraModel.id.in_(ids))
+                    .values(
+                        retention_days=CameraModel.retention_days_pending,
+                        retention_days_pending=None,
+                        retention_pending_from=None,
+                    )
+                )
+                await session.execute(upd)
+                await session.commit()
+
+            logger.info(
+                "Retenção pendente aplicada: %d câmeras atualizadas", len(cameras)
+            )
+        except Exception:
+            await session.rollback()
+            logger.exception("Erro ao aplicar retenção pendente")
+
+
 async def task_cleanup_old_segments(ctx: dict) -> None:
     """Remove segmentos de câmeras com retenção expirada. Roda diariamente."""
     from vms.cameras.models import CameraModel
@@ -92,8 +130,9 @@ def _build_service(session: AsyncSession) -> RecordingService:
 class WorkerSettings:
     """Configurações do worker ARQ para gravações."""
 
-    functions = [task_index_segment, task_cleanup_old_segments]
+    functions = [task_index_segment, task_cleanup_old_segments, task_apply_pending_retention]
     redis_settings: arq.connections.RedisSettings | None = None  # definido na inicialização
     cron_jobs = [
-        arq.cron(task_cleanup_old_segments, hour=3),  # 3h diariamente
+        arq.cron(task_cleanup_old_segments, hour=3),       # 3h diariamente
+        arq.cron(task_apply_pending_retention, hour=3, minute=15),  # 3h15 diariamente
     ]
