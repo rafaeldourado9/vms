@@ -1,10 +1,12 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { BarChart3, Map, Camera, TrendingUp } from 'lucide-react'
+import { format, subDays } from 'date-fns'
 import { analyticsService } from '@/services/analytics'
 import { camerasService } from '@/services/cameras'
 import { PageSpinner } from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/Badge'
+import { DateRangePicker } from '@/components/ui/DateRangePicker'
 import type { ROI, Camera as CameraType, AnalyticsSummary } from '@/types'
 
 const ROI_TYPE_LABELS: Record<string, string> = {
@@ -23,6 +25,10 @@ export function AnalyticsPage() {
   const [cameras, setCameras]   = useState<CameraType[]>([])
   const [summary, setSummary]   = useState<AnalyticsSummary | null>(null)
   const [loading, setLoading]   = useState(true)
+  const [dateRange, setDateRange] = useState({
+    from: format(subDays(new Date(), 7), 'yyyy-MM-dd'),
+    to:   format(new Date(), 'yyyy-MM-dd'),
+  })
 
   useEffect(() => {
     Promise.all([
@@ -57,6 +63,12 @@ export function AnalyticsPage() {
 
   return (
     <div className="space-y-5 animate-fade-in">
+      {/* Date range filter */}
+      <div className="flex items-center gap-3">
+        <span className="text-xs text-t3">Período:</span>
+        <DateRangePicker value={dateRange} onChange={setDateRange} />
+      </div>
+
       {/* Stats */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         {statCards.map(({ label, value, icon: Icon, color }) => (

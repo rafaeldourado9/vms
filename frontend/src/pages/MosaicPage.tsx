@@ -27,23 +27,39 @@ const GRID_CLASS: Record<Layout, string> = {
   '4x4': 'grid-cols-4',
 }
 
+const STORAGE_KEY = 'vms_mosaic_layout'
+
 const makeSlots = (n: number): Slot[] =>
   Array.from({ length: n }, () => ({ cameraId: null, streamUrl: null, cameraName: null }))
 
+function loadSaved(): { layout: Layout; slots: Slot[] } | null {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY)
+    return raw ? JSON.parse(raw) : null
+  } catch { return null }
+}
+
 export function MosaicPage() {
-  const [layout, setLayout]   = useState<Layout>('2x2')
+  const saved = loadSaved()
+  const [layout, setLayout]   = useState<Layout>(saved?.layout ?? '2x2')
   const [cameras, setCameras] = useState<Camera[]>([])
-  const [slots, setSlots]     = useState<Slot[]>(makeSlots(4))
+  const [slots, setSlots]     = useState<Slot[]>(saved?.slots ?? makeSlots(4))
   const [streamCache, setStreamCache] = useState<Record<string, string>>({})
 
   useEffect(() => {
     camerasService.list({ page_size: 100 }).then(setCameras)
   }, [])
 
+  const persistLayout = (l: Layout, s: Slot[]) => {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify({ layout: l, slots: s }))
+  }
+
   const changeLayout = (l: Layout) => {
-    setLayout(l)
     const n = LAYOUTS.find((x) => x.id === l)!.slots
-    setSlots(makeSlots(n))
+    const newSlots = makeSlots(n)
+    setLayout(l)
+    setSlots(newSlots)
+    persistLayout(l, newSlots)
   }
 
   const assignCamera = async (slotIdx: number, camId: string) => {
@@ -59,15 +75,21 @@ export function MosaicPage() {
       } catch { url = '' }
     }
 
-    setSlots((prev) =>
-      prev.map((s, i) =>
+    setSlots((prev) => {
+      const next = prev.map((s, i) =>
         i === slotIdx ? { cameraId: camId, streamUrl: url, cameraName: cam.name } : s,
-      ),
-    )
+      )
+      persistLayout(layout, next)
+      return next
+    })
   }
 
   const clearSlot = (idx: number) => {
-    setSlots((prev) => prev.map((s, i) => i === idx ? { cameraId: null, streamUrl: null, cameraName: null } : s))
+    setSlots((prev) => {
+      const next = prev.map((s, i) => i === idx ? { cameraId: null, streamUrl: null, cameraName: null } : s)
+      persistLayout(layout, next)
+      return next
+    })
   }
 
   return (

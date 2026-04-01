@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from urllib.parse import parse_qs
 
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, Query, status
 
 from vms.cameras.repository import CameraRepository
 from vms.core.deps import DbSession
@@ -79,6 +79,32 @@ async def read_auth(body: ReadAuthRequest, db: DbSession) -> PublishAuthResponse
         )
 
     return PublishAuthResponse(ok=True)
+
+
+@router.get(
+    "/streaming/auth-check",
+    status_code=status.HTTP_200_OK,
+    summary="Nginx auth_request — valida viewer token",
+    tags=["streaming"],
+    include_in_schema=False,
+)
+async def streaming_auth_check(
+    token: str = Query(""),
+    path: str = Query(""),
+    db: DbSession = None,  # type: ignore[assignment]
+) -> dict[str, str]:
+    """
+    Chamado pelo nginx via `auth_request` para /hls/ e /webrtc/.
+    Retorna 200 se token válido, 401 caso contrário.
+    """
+    svc = _streaming_svc(db)
+    allowed = await svc.verify_viewer_token(token, path)
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token de visualização inválido ou expirado",
+        )
+    return {"ok": "true"}
 
 
 def _extract_token(query: str) -> str:

@@ -141,6 +141,12 @@ services:
         condition: service_healthy
     networks: [vms]
 
+  # ─── Frontend ─────────────────────────────────────────────────────────────
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    networks: [vms]
+
   # ─── Nginx ────────────────────────────────────────────────────────────────
   nginx:
     image: nginx:1.25-alpine
@@ -154,6 +160,7 @@ services:
       - recordings:/recordings:ro
     depends_on:
       - api
+      - frontend
     networks: [vms]
 
 volumes:

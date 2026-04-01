@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Save, Palette } from 'lucide-react'
+import { useState, useRef } from 'react'
+import { Save, Palette, Upload } from 'lucide-react'
 import { useThemeStore } from '@/store/themeStore'
 import toast from 'react-hot-toast'
 
@@ -21,6 +21,15 @@ export function SettingsPage() {
   const [accent, setAccent]     = useState(accentColor)
   const [logo, setLogo]         = useState(logoUrl ?? '')
   const [saving, setSaving]     = useState(false)
+  const fileInputRef            = useRef<HTMLInputElement>(null)
+
+  const handleLogoFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    const reader = new FileReader()
+    reader.onload = (ev) => setLogo(ev.target?.result as string)
+    reader.readAsDataURL(file)
+  }
 
   const handleSave = async () => {
     setSaving(true)
@@ -54,13 +63,29 @@ export function SettingsPage() {
         </div>
 
         <div>
-          <label className="label">URL do Logo (opcional)</label>
-          <input
-            className="input"
-            value={logo}
-            onChange={(e) => setLogo(e.target.value)}
-            placeholder="https://exemplo.com/logo.png"
-          />
+          <label className="label">Logo (upload ou URL)</label>
+          <div className="flex gap-2">
+            <input
+              className="input flex-1"
+              value={logo}
+              onChange={(e) => setLogo(e.target.value)}
+              placeholder="https://exemplo.com/logo.png"
+            />
+            <button
+              type="button"
+              className="btn btn-ghost gap-1.5 shrink-0"
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload size={14} />Upload
+            </button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              className="hidden"
+              onChange={handleLogoFile}
+            />
+          </div>
         </div>
 
         {logo && (
@@ -69,9 +94,16 @@ export function SettingsPage() {
             <img
               src={logo}
               alt="Logo preview"
-              className="h-8 w-auto object-contain"
-              onError={() => toast.error('URL de logo inválida')}
+              className="h-10 w-auto object-contain rounded"
+              onError={() => toast.error('Logo inválido')}
             />
+            <button
+              type="button"
+              className="text-xs text-danger hover:underline"
+              onClick={() => setLogo('')}
+            >
+              Remover
+            </button>
           </div>
         )}
       </div>

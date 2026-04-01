@@ -377,15 +377,14 @@
 - [x] Documentação OpenAPI gerada automaticamente verificada
 - [x] `docker compose up` completo funciona sem erros
 - [x] Smoke test E2E: câmera criada → agent heartbeat → stream → recording segment
-- [ ] Nginx: `/hls/` e `/webrtc/` exigem token (sem token → 401 antes de chegar no MediaMTX)
-  - Opção: nginx lua module para validar JWT, ou subrequest para `/streaming/read-auth`
-  - Mais simples: MediaMTX lida via `readAuthURL` hook — nginx apenas faz proxy
-- [ ] Nginx: `/recordings/` serve arquivos apenas com JWT válido
-  - Usar `auth_request` apontando para `/api/v1/recordings/{id}/access-check`
+- [x] Nginx: `/hls/` e `/webrtc/` exigem token (sem token → 401 antes de chegar no MediaMTX)
+  - Implementado via `auth_request /streaming-auth-check` → `GET /streaming/auth-check?token=&path=`
+- [x] Nginx: `/recordings/` serve arquivos apenas com JWT válido
+  - Implementado via `auth_request /recordings-auth-check`
 - [x] Rate limit diferenciado: webhooks câmera (500/min), API auth (5/min), API geral (120/min), SSE (30 conexões simultâneas)
-- [ ] ARQ dead letter queue — tasks que falham 3× → DLQ + alerta via NotificationRule tipo `system.task_failed`
+- [x] ARQ dead letter queue — tasks que falham 3× → DLQ + alerta via NotificationRule tipo `system.task_failed`
 - [x] `docker-compose.yml` — adicionar `restart: unless-stopped` em todos os serviços críticos
-- [ ] Smoke test completo RTMP push: câmera RTMP → stream live → recording → download
+- [x] Smoke test completo RTMP push: câmera RTMP → stream live → recording → download
 
 **Critério de aceite final:**
 - `make test` → todos os testes passam
@@ -527,13 +526,13 @@ react-hot-toast                — notificações toast
 - [x] `components/ui/Modal.tsx` — props: `open`, `onClose`, `title`, `size` (sm/md/lg/xl/full), `footer`; Escape key; click fora fecha; animação slide-in
 - [x] `components/ui/Badge.tsx` — props: `variant` (default/success/warning/danger/info), `dot`, `className`
 - [x] `components/ui/Spinner.tsx` — `<Spinner />` inline + `<PageSpinner />` full-height centered
-- [ ] `components/ui/Tooltip.tsx` — hover tooltip simples (usar `title` nativo como fallback)
+- [x] `components/ui/Tooltip.tsx` — hover tooltip simples (usar `title` nativo como fallback)
 - [x] `components/ui/Confirm.tsx` — modal de confirmação: "Tem certeza?" com btn-danger; hook `useConfirm()`
 
 #### Camera Components
 
 - [x] `components/camera/VideoPlayer.tsx` — HLS.js + controles hover (play/pause, mute, fullscreen); overlay prop para canvas de detecção; camera name overlay top-left; estados: loading (spinner), error ("Sem sinal"), no-source; `lowLatencyMode: true`, `maxBufferLength: 10`
-- [ ] `components/camera/DetectionOverlay.tsx` — canvas sobreposto ao vídeo; recebe `detections: { bbox, label, confidence }[]`; re-escala bbox normalizada para pixels
+- [x] `components/camera/DetectionOverlay.tsx` — canvas sobreposto ao vídeo; recebe `detections: { bbox, label, confidence }[]`; re-escala bbox normalizada para pixels
 - [x] `components/camera/CameraCard.tsx` — thumbnail (snapshot ou placeholder escuro); status dot (verde/vermelho); badge Online/Offline; badge "IA" se analytics ativos; protocolo (RTSP/RTMP/ONVIF); hover: botões Visualizar + Configurar
 
 #### Layout
@@ -546,7 +545,7 @@ react-hot-toast                — notificações toast
 
 - [x] `hooks/useSSE.ts` — conecta `GET /sse/events` com JWT; reconecta em caso de drop; retorna `{ lastEvent, connected }`
 - [x] `hooks/usePermission.ts` — `isAdmin()`, `isOperator()`, `isViewer()` baseado no role do authStore
-- [ ] `hooks/useTheme.ts` — aplica `--accent` e título da aba via themeStore; busca theme em `GET /api/v1/tenants/me/theme`
+- [x] `hooks/useTheme.ts` — aplica `--accent` e título da aba via themeStore; busca theme em `GET /api/v1/tenants/me/theme`
 - [x] `hooks/useConfirm.ts` — retorna `confirm(message): Promise<boolean>` renderizando `<Confirm />`
 
 #### Services / API Client
@@ -559,8 +558,8 @@ react-hot-toast                — notificações toast
 - [x] `services/events.ts` — `list()`, `get()` (com filtros: camera, tipo, placa, data)
 - [x] `services/notifications.ts` — `listRules()`, `createRule()`, `updateRule()`, `deleteRule()`, `listLogs()`
 - [x] `services/analytics.ts` — `listROIs()`, `createROI()`, `updateROI()`, `deleteROI()`, `roiEvents()`, `summary()`
-- [ ] `services/dashboard.ts` — `stats()`, `detectionsByHour()`
-- [ ] `services/iam.ts` — `listUsers()`, `createUser()`, `updateUser()`, `deactivateUser()` (coberto por `services/users.ts`)
+- [x] `services/dashboard.ts` — `stats()`, `detectionsByHour()`
+- [x] `services/iam.ts` — `listUsers()`, `createUser()`, `updateUser()`, `deactivateUser()` (coberto por `services/users.ts`)
 
 ---
 
@@ -956,8 +955,8 @@ Left (hidden mobile):           Right:
 
 **Checklist:**
 - [x] `pages/DashboardPage.tsx`
-- [ ] SSE integration — `useSSE()` hook atualiza counters em tempo real
-- [ ] `services/dashboard.ts`
+- [x] SSE integration — `useSSE()` hook atualiza counters em tempo real
+- [x] `services/dashboard.ts`
 
 ---
 
@@ -993,7 +992,7 @@ Left (hidden mobile):           Right:
 **Checklist:**
 - [x] `pages/CamerasPage.tsx`
 - [x] `components/camera/CameraCard.tsx`
-- [ ] SSE: camera.online/offline atualiza status dot sem reload
+- [x] SSE: camera.online/offline atualiza status dot sem reload
 
 ---
 
@@ -1049,7 +1048,7 @@ Left (hidden mobile):           Right:
 **Checklist:**
 - [x] `pages/CameraDetailPage.tsx`
 - [x] Protocol switcher (HLS↔WebRTC)
-- [ ] Snapshot modal
+- [x] Snapshot modal
 
 ---
 
@@ -1087,7 +1086,7 @@ Left (hidden mobile):           Right:
 **Checklist:**
 - [x] `pages/ROIEditorPage.tsx`
 - [x] Canvas com SVG overlay (polígonos interativos)
-- [ ] `hooks/useROIEditor.ts` — lógica de desenho/edição de polígono (inline na página)
+- [x] `hooks/useROIEditor.ts` — lógica de desenho/edição de polígono (inline na página)
 
 ---
 
@@ -1109,7 +1108,7 @@ Left (hidden mobile):           Right:
 
 **Checklist:**
 - [x] `pages/MosaicPage.tsx`
-- [ ] Persist layout no localStorage
+- [x] Persist layout no localStorage
 - [x] Fullscreen API
 
 ---
@@ -1146,7 +1145,7 @@ Left (hidden mobile):           Right:
 
 **Checklist:**
 - [x] `pages/RecordingsPage.tsx`
-- [ ] `components/recordings/TimelineBar.tsx` — barra 24h com drag handles para clip range
+- [x] `components/recordings/TimelineBar.tsx` — barra 24h com drag handles para clip range
 - [x] Download de segmento individual
 
 ---
@@ -1177,7 +1176,7 @@ Left (hidden mobile):           Right:
 **Checklist:**
 - [x] `pages/EventsPage.tsx`
 - [x] Modal de detalhe com thumbnail e payload
-- [ ] Export CSV (blob download via axios)
+- [x] Export CSV (blob download via axios)
 
 ---
 
@@ -1210,7 +1209,7 @@ Left (hidden mobile):           Right:
 
 **Checklist:**
 - [x] `pages/AnalyticsPage.tsx`
-- [ ] Date range picker reutilizável `components/ui/DateRangePicker.tsx`
+- [x] Date range picker reutilizável `components/ui/DateRangePicker.tsx`
 - [x] `services/analytics.ts` — summary + ROI events
 
 ---
@@ -1327,7 +1326,7 @@ Left (hidden mobile):           Right:
 **Checklist:**
 - [x] `pages/SettingsPage.tsx`
 - [x] Color picker com live preview de `--accent`
-- [ ] Logo upload com preview + crop (ou simples URL)
+- [x] Logo upload com preview + crop (ou simples URL)
 
 ---
 
@@ -1335,7 +1334,7 @@ Left (hidden mobile):           Right:
 
 - [x] `store/authStore.ts` — user, tokens, setAuth(), logout(), persist localStorage
 - [x] `store/themeStore.ts` — theme, primaryColor(), side effects em CSS var + favicon + title
-- [ ] `store/cameraStore.ts` — cache de status cameras (online/offline) atualizado via SSE
+- [x] `store/cameraStore.ts` — cache de status cameras (online/offline) atualizado via SSE
 - [x] `hooks/useSSE.ts` — implementação:
   ```ts
   // Conecta /sse/events com JWT
@@ -1352,11 +1351,11 @@ Left (hidden mobile):           Right:
 
 ### 9.6 Testes Frontend
 
-- [ ] Vitest config + React Testing Library setup
-- [ ] `tests/unit/components/VideoPlayer.test.tsx` — render, HLS init, states
-- [ ] `tests/unit/components/AddCameraWizard.test.tsx` — navegação de passos, validação
-- [ ] `tests/unit/components/OnboardingWizard.test.tsx` — trigger, progresso, skip
-- [ ] `tests/unit/hooks/useSSE.test.ts` — connect, event handling, reconnect
+- [x] Vitest config + React Testing Library setup
+- [x] `tests/unit/components/VideoPlayer.test.tsx` — render, HLS init, states
+- [x] `tests/unit/components/AddCameraWizard.test.tsx` — navegação de passos, validação
+- [x] `tests/unit/components/OnboardingWizard.test.tsx` — trigger, progresso, skip
+- [x] `tests/unit/hooks/useSSE.test.ts` — connect, event handling, reconnect
 - [ ] `tests/unit/services/api.test.ts` — interceptors, refresh
 - [ ] `tests/e2e/` (Playwright — pós-MVP):
   - Login + redirect
@@ -1368,47 +1367,47 @@ Left (hidden mobile):           Right:
 ### 9.7 Build & Integração Docker
 
 - [x] `frontend/Dockerfile` — multi-stage: `node:20-alpine` build → `nginx:1.25-alpine` serve
-- [ ] `infra/nginx/nginx.conf` — adicionar `location /` serving frontend, SPA fallback `try_files $uri /index.html`
-- [ ] `docker-compose.yml` — adicionar serviço `frontend` (build + nginx) ou servir o dist via nginx existente
+- [x] `infra/nginx/nginx.conf` — adicionar `location /` serving frontend, SPA fallback `try_files $uri /index.html`
+- [x] `docker-compose.yml` — adicionar serviço `frontend` (build + nginx) ou servir o dist via nginx existente
 - [x] Vite proxy em dev: `/api` → `localhost:8000`, sem CORS issues
-- [ ] `make dev-fe` — `vite dev` com hot reload
-- [ ] `make build-fe` — `vite build` + verifica bundle size
+- [x] `make dev-fe` — `vite dev` com hot reload
+- [x] `make build-fe` — `vite build` + verifica bundle size
 
 ---
 
 ### 9.8 Critérios de Aceite Frontend
 
 **Visual:**
-- [ ] Dark mode correto (CSS vars idênticas ao legado)
-- [ ] Responsive: funciona em 1280px (desktop operador) e 768px (tablet)
-- [ ] Sem flash of unstyled content (CSS vars no `:root`)
-- [ ] Scroll suave, animações fade-in em page transitions
+- [x] Dark mode correto (CSS vars idênticas ao legado)
+- [x] Responsive: funciona em 1280px (desktop operador) e 768px (tablet)
+- [x] Sem flash of unstyled content (CSS vars no `:root`)
+- [x] Scroll suave, animações fade-in em page transitions
 
 **Funcional:**
-- [ ] Login → JWT armazenado → refresh automático → logout limpa store
-- [ ] Onboarding aparece uma única vez em accounts novas
-- [ ] AddCamera wizard: todos os 6 protocolos, validação por passo, revisão antes de criar
-- [ ] VideoPlayer: HLS com token, fallback WebRTC, "Sem sinal" em erro
-- [ ] Mosaic: 6 layouts, persist localStorage, fullscreen
-- [ ] Timeline recordings: clicável, create clip com time range
-- [ ] SSE: camera.online/offline atualiza dot sem refresh
-- [ ] ALPR event chega via SSE → toast com placa detectada
+- [x] Login → JWT armazenado → refresh automático → logout limpa store
+- [x] Onboarding aparece uma única vez em accounts novas
+- [x] AddCamera wizard: todos os 6 protocolos, validação por passo, revisão antes de criar
+- [x] VideoPlayer: HLS com token, fallback WebRTC, "Sem sinal" em erro
+- [x] Mosaic: 6 layouts, persist localStorage, fullscreen
+- [x] Timeline recordings: clicável, create clip com time range
+- [x] SSE: camera.online/offline atualiza dot sem refresh
+- [x] ALPR event chega via SSE → toast com placa detectada
 
 ---
 
 ## Progresso Geral
 
 ```
-Sprint 0  ██████████░░  ✅ Estrutura + Docs (infra configs pendentes)
+Sprint 0  ████████████  ✅ Estrutura + Docs
 Sprint 1  ████████████  ✅ IAM + Foundation (51 testes)
-Sprint 2  ████████░░░░  ✅ Cameras + Agents | ░ ONVIF + multi-protocol
-Sprint 3  ████████░░░░  ✅ Streaming + Recordings | ░ viewer auth + RTMP push + download
+Sprint 2  ████████████  ✅ Cameras + Agents + ONVIF + multi-protocol
+Sprint 3  ████████████  ✅ Streaming + Recordings + viewer auth + RTMP push
 Sprint 4  ████████████  ✅ Events + ALPR (42 testes + 3 BDD)
 Sprint 5  ████████████  ✅ Notifications + Event Bus + SSE + Health
-Sprint 6  ████████░░░░  ✅ Edge Agent | ░ WebSocket push + STUN/TURN docs
-Sprint 7  ████████░░░░  ✅ Analytics (4 plugins) | ░ ROI events + summary
-Sprint 8  ████████░░░░  ✅ Security + Polish | ░ auth em /hls/ e /recordings/
-Sprint 9  ░░░░░░░░░░░░  ☐ Frontend (após backend 100%)
+Sprint 6  ████████████  ✅ Edge Agent + WebSocket push + STUN/TURN docs
+Sprint 7  ████████████  ✅ Analytics (4 plugins) + ROI events + summary
+Sprint 8  ████████████  ✅ Security + Polish + nginx auth + ARQ DLQ
+Sprint 9  ████████░░░░  ✅ Frontend (telas + componentes + testes unitários)
 ```
 
 ---

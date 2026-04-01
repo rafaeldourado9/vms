@@ -60,6 +60,19 @@ async def task_dispatch_notification(
                 "Webhook despachado: rule=%s event=%s status=%s",
                 rule_id, event_id, log.status,
             )
-        except Exception:
+        except Exception as exc:
             await session.rollback()
             logger.exception("Erro ao despachar notificação: rule=%s event=%s", rule_id, event_id)
+            # Registra falha na DLQ
+            try:
+                from vms.core.dlq import record_failure
+                job_id = ctx.get("job_id", f"{rule_id}:{event_id}")
+                await record_failure(
+                    ctx["redis"],
+                    "task_dispatch_notification",
+                    str(job_id),
+                    str(exc),
+                )
+            except Exception:
+                pass
+            raise

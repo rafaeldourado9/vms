@@ -17,4 +17,12 @@ export default defineConfig({
       '/health': 'http://localhost:8000',
     },
   },
+  test: {
+    globals: true,
+    environment: 'jsdom',
+    setupFiles: ['./src/tests/setup.ts'],
+    alias: {
+      '@': path.resolve(__dirname, './src'),
+    },
+  },
 })

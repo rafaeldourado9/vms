@@ -9,6 +9,8 @@ import { eventsService } from '@/services/events'
 import { analyticsService } from '@/services/analytics'
 import { PageSpinner } from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/Badge'
+import { useSSE } from '@/hooks/useSSE'
+import { useCameraStore } from '@/store/cameraStore'
 import type { Camera, VmsEvent, AnalyticsSummary } from '@/types'
 
 const EVENT_LABELS: Record<string, string> = {
@@ -44,6 +46,20 @@ export function DashboardPage() {
   const [summary, setSummary]   = useState<AnalyticsSummary | null>(null)
   const [loading, setLoading]   = useState(true)
 
+  const { lastEvent } = useSSE()
+  const setOnline  = useCameraStore((s) => s.setOnline)
+  const setOffline = useCameraStore((s) => s.setOffline)
+  const sseStatuses = useCameraStore((s) => s.cameras)
+
+  useEffect(() => {
+    if (!lastEvent) return
+    const type = lastEvent.type as string | undefined
+    const cameraId = lastEvent.camera_id as string | undefined
+    if (!cameraId) return
+    if (type === 'camera.online')  setOnline(cameraId)
+    if (type === 'camera.offline') setOffline(cameraId)
+  }, [lastEvent, setOnline, setOffline])
+
   useEffect(() => {
     Promise.all([
       camerasService.list({ page_size: 100 }),
@@ -58,14 +74,19 @@ export function DashboardPage() {
 
   if (loading) return <PageSpinner />
 
-  const onlineCount  = cameras.filter((c) => c.is_online).length
-  const offlineCount = cameras.filter((c) => !c.is_online).length
+  // Merge SSE realtime status with loaded cameras
+  const mergedCameras = cameras.map((c) =>
+    c.id in sseStatuses ? { ...c, is_online: sseStatuses[c.id].online } : c,
+  )
+
+  const onlineCount  = mergedCameras.filter((c) => c.is_online).length
+  const offlineCount = mergedCameras.filter((c) => !c.is_online).length
   const hourData     = buildHourData(summary)
 
   const statCards = [
-    { label: 'Total de Câmeras', value: cameras.length,         icon: Cctv,        color: '#3B82F6' },
-    { label: 'Online',           value: onlineCount,            icon: Wifi,        color: '#22C55E' },
-    { label: 'Offline',          value: offlineCount,           icon: WifiOff,     color: '#EF4444' },
+    { label: 'Total de Câmeras', value: mergedCameras.length,       icon: Cctv,        color: '#3B82F6' },
+    { label: 'Online',           value: onlineCount,                icon: Wifi,        color: '#22C55E' },
+    { label: 'Offline',          value: offlineCount,               icon: WifiOff,     color: '#EF4444' },
     { label: 'Eventos Hoje',     value: summary?.total_events ?? 0, icon: ShieldAlert, color: '#F59E0B' },
     { label: 'Tipos Analytics',  value: Object.keys(summary?.by_type ?? {}).length, icon: BarChart3, color: '#8B5CF6' },
   ]
@@ -179,7 +200,7 @@ export function DashboardPage() {
           </button>
         </div>
         <div className="space-y-2">
-          {cameras.slice(0, 6).map((cam) => (
+          {mergedCameras.slice(0, 6).map((cam) => (
             <div
               key={cam.id}
               className="flex items-center gap-3 px-3 py-2.5 rounded-lg hover:bg-elevated transition cursor-pointer"
@@ -200,7 +221,7 @@ export function DashboardPage() {
               </div>
             </div>
           ))}
-          {cameras.length === 0 && (
+          {mergedCameras.length === 0 && (
             <p className="text-sm text-t3 text-center py-4">Nenhuma câmera cadastrada</p>
           )}
         </div>

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react'
-import { Search, Filter } from 'lucide-react'
+import { useEffect, useState, useCallback } from 'react'
+import { Search, Filter, Download } from 'lucide-react'
 import { format } from 'date-fns'
 import { eventsService } from '@/services/events'
 import { camerasService } from '@/services/cameras'
@@ -57,6 +57,32 @@ export function EventsPage() {
     setPage(1)
     load(1, filters)
   }
+
+  const exportCsv = useCallback(() => {
+    const header = 'id,tipo,placa,confianca,camera_id,data_hora'
+    const rows = events.map((evt) => {
+      const confidence = typeof evt.raw_payload?.confidence === 'number'
+        ? (evt.raw_payload.confidence as number).toFixed(2)
+        : ''
+      const cols = [
+        evt.id,
+        evt.event_type,
+        evt.plate ?? '',
+        confidence,
+        evt.camera_id,
+        format(new Date(evt.occurred_at), 'dd/MM/yyyy HH:mm:ss'),
+      ]
+      return cols.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(',')
+    })
+    const csv = [header, ...rows].join('\n')
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+    const url  = URL.createObjectURL(blob)
+    const a    = document.createElement('a')
+    a.href     = url
+    a.download = `eventos_${format(new Date(), 'yyyyMMdd_HHmmss')}.csv`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [events])
 
   const pages = Math.ceil(total / PAGE_SIZE)
 
@@ -131,6 +157,15 @@ export function EventsPage() {
       <div className="card overflow-hidden">
         <div className="px-4 py-3 border-b flex items-center justify-between" style={{ borderColor: 'var(--border)' }}>
           <p className="text-xs text-t3">{total} eventos encontrados</p>
+          <button
+            className="btn btn-ghost text-xs gap-1.5"
+            onClick={exportCsv}
+            disabled={events.length === 0}
+            title="Exportar eventos visíveis como CSV"
+          >
+            <Download size={14} />
+            Exportar CSV
+          </button>
         </div>
         {loading ? <PageSpinner /> : (
           <table className="w-full text-sm">

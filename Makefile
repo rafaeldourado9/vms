@@ -107,3 +107,10 @@ backup: ## Backup do banco
 
 health: ## Checa saúde da stack
 	curl -s http://localhost/health | python -m json.tool
+
+# ─── Frontend ────────────────────────────────────────────────────────────────
+dev-fe: ## Inicia o frontend em modo dev com hot-reload
+	cd frontend && npm run dev
+
+build-fe: ## Gera build de produção do frontend
+	cd frontend && npm run build

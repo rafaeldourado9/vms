@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Settings, Map, Wifi, Edit2, Save, X, Film, ShieldAlert } from 'lucide-react'
+import { ArrowLeft, Settings, Map, Wifi, Edit2, Save, X, Film, ShieldAlert, Camera as CameraIcon } from 'lucide-react'
 import { clsx } from 'clsx'
 import { format } from 'date-fns'
 import { camerasService } from '@/services/cameras'
@@ -10,6 +10,7 @@ import { recordingsService } from '@/services/recordings'
 import { VideoPlayer } from '@/components/camera/VideoPlayer'
 import { PageSpinner } from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/Badge'
+import { Modal } from '@/components/ui/Modal'
 import { usePermission } from '@/hooks/usePermission'
 import toast from 'react-hot-toast'
 import type { Camera, ROI, VmsEvent, Clip } from '@/types'
@@ -42,8 +43,11 @@ export function CameraDetailPage() {
   const [events, setEvents]     = useState<VmsEvent[]>([])
   const [clips, setClips]       = useState<Clip[]>([])
   const [loading, setLoading]   = useState(true)
-  const [editing, setEditing]   = useState(false)
-  const [editForm, setEditForm] = useState<Partial<Camera>>({})
+  const [editing, setEditing]     = useState(false)
+  const [editForm, setEditForm]   = useState<Partial<Camera>>({})
+  const [snapshotOpen, setSnapshotOpen] = useState(false)
+  const [snapshotUrl, setSnapshotUrl]   = useState('')
+  const [snapshotLoading, setSnapshotLoading] = useState(false)
 
   useEffect(() => {
     if (!id) return
@@ -82,6 +86,21 @@ export function CameraDetailPage() {
       setEditing(false)
       toast.success('Câmera atualizada')
     } catch { toast.error('Erro ao salvar') }
+  }
+
+  const openSnapshot = async () => {
+    if (!id) return
+    setSnapshotLoading(true)
+    setSnapshotOpen(true)
+    try {
+      const { snapshot_url } = await camerasService.snapshot(id)
+      setSnapshotUrl(snapshot_url)
+    } catch {
+      toast.error('Erro ao capturar snapshot')
+      setSnapshotOpen(false)
+    } finally {
+      setSnapshotLoading(false)
+    }
   }
 
   const toggleROI = async (roi: ROI) => {
@@ -157,6 +176,12 @@ export function CameraDetailPage() {
               </div>
             </div>
             <button
+              className="btn btn-ghost w-full gap-2"
+              onClick={openSnapshot}
+            >
+              <CameraIcon size={15} />Snapshot
+            </button>
+            <button
               className="btn btn-primary w-full gap-2"
               onClick={() => navigate(`/cameras/${id}/roi`)}
             >
@@ -165,6 +190,23 @@ export function CameraDetailPage() {
           </div>
         </div>
       )}
+
+      {/* Snapshot modal */}
+      <Modal open={snapshotOpen} onClose={() => setSnapshotOpen(false)} title="Snapshot" size="lg">
+        <div className="flex items-center justify-center min-h-[200px]">
+          {snapshotLoading ? (
+            <div className="text-t3 text-sm">Capturando snapshot…</div>
+          ) : snapshotUrl ? (
+            <img
+              src={snapshotUrl}
+              alt="Snapshot"
+              className="w-full h-auto rounded-lg object-contain"
+            />
+          ) : (
+            <div className="text-t3 text-sm">Snapshot indisponível</div>
+          )}
+        </div>
+      </Modal>
 
       {/* Info */}
       {tab === 'info' && (

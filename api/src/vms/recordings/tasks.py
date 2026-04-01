@@ -42,9 +42,17 @@ async def task_index_segment(
             )
             await session.commit()
             logger.info("Segmento indexado: %s", file_path)
-        except Exception:
+        except Exception as exc:
             await session.rollback()
             logger.exception("Erro ao indexar segmento: %s", file_path)
+            try:
+                from vms.core.dlq import record_failure
+                await record_failure(
+                    ctx["redis"], "task_index_segment", file_path, str(exc),
+                )
+            except Exception:
+                pass
+            raise
 
 
 async def task_cleanup_old_segments(ctx: dict) -> None:

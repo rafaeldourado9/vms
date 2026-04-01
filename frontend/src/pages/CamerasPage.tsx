@@ -7,6 +7,8 @@ import { CameraCard } from '@/components/camera/CameraCard'
 import { PageSpinner } from '@/components/ui/Spinner'
 import { AddCameraWizard } from '@/components/wizard/AddCameraWizard'
 import { usePermission } from '@/hooks/usePermission'
+import { useSSE } from '@/hooks/useSSE'
+import { useCameraStore } from '@/store/cameraStore'
 import toast from 'react-hot-toast'
 import type { Camera } from '@/types'
 
@@ -24,10 +26,36 @@ export function CamerasPage() {
   const [filter, setFilter]   = useState<FilterStatus>('all')
   const [showAdd, setShowAdd] = useState(false)
 
+  const { lastEvent } = useSSE()
+  const setOnline  = useCameraStore((s) => s.setOnline)
+  const setOffline = useCameraStore((s) => s.setOffline)
+  const sseStatuses = useCameraStore((s) => s.cameras)
+
+  useEffect(() => {
+    if (!lastEvent) return
+    const type = lastEvent.type as string | undefined
+    const cameraId = lastEvent.camera_id as string | undefined
+    if (!cameraId) return
+    if (type === 'camera.online') {
+      setOnline(cameraId)
+      setCameras((prev) => prev.map((c) => c.id === cameraId ? { ...c, is_online: true } : c))
+    }
+    if (type === 'camera.offline') {
+      setOffline(cameraId)
+      setCameras((prev) => prev.map((c) => c.id === cameraId ? { ...c, is_online: false } : c))
+    }
+  }, [lastEvent, setOnline, setOffline])
+
   const load = () => {
     setLoading(true)
     camerasService.list({ page_size: 200 })
-      .then(setCameras)
+      .then((cams) => {
+        // Merge with any SSE status already received before load completed
+        const merged = cams.map((c) =>
+          c.id in sseStatuses ? { ...c, is_online: sseStatuses[c.id].online } : c,
+        )
+        setCameras(merged)
+      })
       .finally(() => setLoading(false))
   }
 
