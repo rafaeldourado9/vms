@@ -51,6 +51,7 @@ class UpdateCameraRequest(BaseModel):
     manufacturer: str | None = None
     retention_days: int | None = Field(default=None, ge=1, le=90)
     agent_id: str | None = None
+    ptz_supported: bool | None = None
     is_active: bool | None = None
 
 
@@ -70,6 +71,7 @@ class CameraResponse(BaseModel):
     onvif_username: str | None
     manufacturer: str
     retention_days: int
+    ptz_supported: bool
     is_active: bool
     is_online: bool
     agent_id: str | None

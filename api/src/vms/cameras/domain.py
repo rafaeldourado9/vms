@@ -83,6 +83,7 @@ class Camera:
     location: str | None = None
     agent_id: str | None = None           # null para rtmp_push
     retention_days: int = 7
+    ptz_supported: bool = False
     is_active: bool = True
     is_online: bool = False
     last_seen_at: datetime | None = None

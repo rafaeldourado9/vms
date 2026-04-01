@@ -116,6 +116,7 @@ class CameraService:
         location: str | None = None,
         retention_days: int | None = None,
         agent_id: str | None = None,
+        ptz_supported: bool | None = None,
         is_active: bool | None = None,
     ) -> Camera:
         """Atualiza campos fornecidos da câmera."""
@@ -138,6 +139,8 @@ class CameraService:
             camera.retention_days = retention_days
         if agent_id is not None:
             camera.agent_id = agent_id
+        if ptz_supported is not None:
+            camera.ptz_supported = ptz_supported
         if is_active is not None:
             camera.is_active = is_active
         updated = await self._cameras.update(camera)

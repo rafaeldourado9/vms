@@ -148,5 +148,9 @@ def _include_routers(app: FastAPI) -> None:
     # Analytics config — ROIs e configuração de análises
     app.include_router(analytics_router, prefix="/api/v1")
 
+    # PTZ — controle Pan-Tilt-Zoom via ONVIF
+    from vms.ptz.router import router as ptz_router
+    app.include_router(ptz_router, prefix="/api/v1")
+
 
 app = create_app()

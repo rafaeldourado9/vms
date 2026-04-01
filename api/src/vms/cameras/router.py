@@ -146,6 +146,7 @@ async def update_camera(
         location=body.location,
         retention_days=body.retention_days,
         agent_id=body.agent_id,
+        ptz_supported=body.ptz_supported,
         is_active=body.is_active,
     )
     return CameraResponse.model_validate(camera)

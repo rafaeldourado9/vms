@@ -74,6 +74,7 @@ class CameraModel(Base):
     onvif_password: Mapped[str | None] = mapped_column(String(500), nullable=True)
     manufacturer: Mapped[str] = mapped_column(String(50), nullable=False, default="generic")
     retention_days: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
+    ptz_supported: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_online: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     last_seen_at: Mapped[datetime | None] = mapped_column(
