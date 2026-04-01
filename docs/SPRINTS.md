@@ -110,23 +110,28 @@
 
 ---
 
-## Sprint 2.5 — PTZ & ONVIF Avançado [pós-MVP se necessário]
+## Sprint 2.5 — PTZ & ONVIF Avançado [2026-04-01] ✅
 
 > PTZ (Pan-Tilt-Zoom) via ONVIF para câmeras que suportam.
-> Implementar se cliente tiver demanda antes do MVP. Caso contrário: pós-MVP.
 
-- [ ] `ptz/domain.py` — PtzCommand, PtzPreset, PtzCapabilities
-- [ ] `ptz/service.py` — ContinuousMove, AbsoluteMove, GotoPreset via ONVIF
-- [ ] `ptz/router.py`:
-  - `POST /api/v1/cameras/{id}/ptz/move` — move contínuo (pan/tilt/zoom + speed + stop)
+- [x] `ptz/domain.py` — PtzCommand, PtzPreset, PtzCapabilities, PtzVector
+- [x] `ptz/client.py` — PtzClient ONVIF SOAP raw (httpx): ContinuousMove, AbsoluteMove, Stop, GetPresets, GotoPreset, SetPreset, GetCapabilities
+- [x] `ptz/service.py` — PtzService: move, absolute_move, stop, get_presets, goto_preset, save_preset, probe_capabilities
+- [x] `ptz/schemas.py` — DTOs: PtzMoveRequest, PtzPresetsResponse, SavePresetRequest, PtzActionResponse
+- [x] `ptz/router.py`:
+  - `POST /api/v1/cameras/{id}/ptz/move` — move contínuo (pan/tilt/zoom + timeout)
   - `POST /api/v1/cameras/{id}/ptz/stop` — para movimento
   - `GET /api/v1/cameras/{id}/ptz/presets` — lista presets
   - `POST /api/v1/cameras/{id}/ptz/presets/{n}/goto` — goto preset
   - `POST /api/v1/cameras/{id}/ptz/presets/{n}/save` — salva posição atual como preset
-- [ ] `tests/unit/ptz/test_service.py` — mock ONVIF PTZ service
-- [ ] Checar `cameras/domain.py` — adicionar `ptz_supported: bool` à Camera
+- [x] `tests/unit/ptz/test_service.py` — 14 testes com mock ONVIF PTZ service
+- [x] `cameras/domain.py` — `ptz_supported: bool = False` adicionado à Camera
+- [x] `cameras/models.py` — coluna `ptz_supported` no ORM
+- [x] `cameras/schemas.py` — `ptz_supported` em CameraResponse e UpdateCameraRequest
+- [x] `migrations/versions/004_ptz_supported.py` — migration da coluna
 
 **Critério de aceite:** Move command → câmera se move; goto preset funciona
+**Testes:** 14 novos · 156 total — todos passando
 
 ---
 
