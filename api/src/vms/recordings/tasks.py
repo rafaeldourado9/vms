@@ -34,7 +34,7 @@ async def task_index_segment(
     async with factory() as session:
         try:
             svc = _build_service(session)
-            await svc.index_segment(
+            segment = await svc.index_segment(
                 tenant_id=tenant_id,
                 camera_id=camera_id,
                 file_path=file_path,
@@ -42,6 +42,9 @@ async def task_index_segment(
             )
             await session.commit()
             logger.info("Segmento indexado: %s", file_path)
+
+            # Dispara processamento de analytics pós-gravação
+            await _enqueue_analytics(ctx, segment.id, file_path, camera_id, tenant_id)
         except Exception as exc:
             await session.rollback()
             logger.exception("Erro ao indexar segmento: %s", file_path)
@@ -53,6 +56,38 @@ async def task_index_segment(
             except Exception:
                 pass
             raise
+
+
+async def _enqueue_analytics(
+    ctx: dict,
+    segment_id: str,
+    file_path: str,
+    camera_id: str,
+    tenant_id: str,
+) -> None:
+    """Enfileira task_analytics_segment no worker do analytics service."""
+    try:
+        from arq.connections import RedisSettings, create_pool
+        from vms.core.config import get_settings
+
+        settings = get_settings()
+        redis_settings = RedisSettings.from_dsn(settings.redis_url)
+        pool = await create_pool(redis_settings)
+        try:
+            await pool.enqueue_job(
+                "task_analytics_segment",
+                segment_id,
+                file_path,
+                camera_id,
+                tenant_id,
+            )
+        finally:
+            await pool.aclose()
+        logger.debug("analytics_segment enfileirado para segmento %s", segment_id)
+    except Exception:
+        logger.exception(
+            "Falha ao enfileirar analytics_segment para segmento %s", segment_id
+        )
 
 
 async def task_apply_pending_retention(ctx: dict) -> None:

@@ -28,8 +28,9 @@ describe('OnboardingWizard', () => {
 
   it('shows step indicators', () => {
     render(<OnboardingWizard onComplete={onComplete} />)
-    // Should show step dots
-    const steps = screen.getAllByRole('button').filter((b) => b.className.includes('rounded-full'))
-    expect(steps.length).toBeGreaterThan(0)
+    // Step indicators are <div> elements with rounded-full class (not buttons)
+    const { container } = render(<OnboardingWizard onComplete={onComplete} />)
+    const stepDots = container.querySelectorAll('.rounded-full')
+    expect(stepDots.length).toBeGreaterThan(0)
   })
 })

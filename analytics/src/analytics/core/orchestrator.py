@@ -80,17 +80,30 @@ class Orchestrator:
             except Exception:
                 logger.exception("Erro ao carregar plugin %s", name)
 
+    # Tipos de ROI processados exclusivamente em modo real-time (1fps live)
+    REALTIME_TYPES: frozenset[str] = frozenset({"intrusion"})
+
     async def start(self, cameras: list[dict]) -> None:
         """
         Inicia captura para todas as câmeras.
 
         cameras: lista de dicts com keys camera_id, tenant_id, stream_url.
+
+        Modo dual:
+        - Câmeras com ROI ia_type=intrusion → real-time (1fps via RTSP)
+        - Demais tipos → pós-gravação via segment_processor (ARQ task)
+
+        Este método só inicia loops real-time. O processamento pós-gravação
+        é disparado pelo VMS API via ARQ task após index_segment().
         """
         await self._vms_client.start()
         self._running = True
 
+        # Filtra apenas câmeras que têm ROIs de intrusão ativas (real-time)
+        intrusion_cameras = await self._filter_intrusion_cameras(cameras)
+
         settings = get_settings()
-        for cam in cameras:
+        for cam in intrusion_cameras:
             task = asyncio.create_task(
                 self._process_camera(
                     camera_id=cam["camera_id"],
@@ -100,7 +113,32 @@ class Orchestrator:
                 )
             )
             self._tasks.append(task)
-        logger.info("Orchestrator iniciado para %d câmeras", len(cameras))
+
+        if intrusion_cameras:
+            logger.info(
+                "Orchestrator real-time iniciado para %d câmeras com intrusão (de %d total)",
+                len(intrusion_cameras),
+                len(cameras),
+            )
+        else:
+            logger.info(
+                "Nenhuma câmera com ROI de intrusão — modo real-time inativo. "
+                "Analytics via pós-gravação (ARQ task_analytics_segment).",
+            )
+
+    async def _filter_intrusion_cameras(self, cameras: list[dict]) -> list[dict]:
+        """Retorna apenas câmeras que possuem ROIs ativas de intrusão."""
+        result: list[dict] = []
+        for cam in cameras:
+            try:
+                rois = await self._vms_client.get_camera_rois(cam["camera_id"])
+                if any(r.ia_type in self.REALTIME_TYPES for r in rois):
+                    result.append(cam)
+            except Exception:
+                logger.exception(
+                    "Erro ao verificar ROIs de câmera %s", cam["camera_id"]
+                )
+        return result
 
     async def stop(self) -> None:
         """Para captura de todas as câmeras e encerra plugins."""
@@ -158,6 +196,9 @@ class Orchestrator:
                 )
 
                 for roi_type, plugin in self._plugins.items():
+                    # Real-time loop: processa SOMENTE plugins de intrusão
+                    if roi_type not in self.REALTIME_TYPES:
+                        continue
                     matching_rois = [r for r in roi_cache if r.ia_type == roi_type]
                     if not matching_rois:
                         continue

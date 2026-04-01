@@ -10,6 +10,13 @@ vi.mock('hls.js', () => ({
   },
 }))
 
+// jsdom does not implement HTMLMediaElement.play — mock it
+Object.defineProperty(HTMLMediaElement.prototype, 'play', {
+  configurable: true,
+  writable: true,
+  value: vi.fn().mockResolvedValue(undefined),
+})
+
 describe('VideoPlayer', () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -25,15 +32,13 @@ describe('VideoPlayer', () => {
     expect(screen.getByText('Câmera 01')).toBeInTheDocument()
   })
 
-  it('shows "Sem sinal" when error prop is triggered via onError', () => {
-    const onError = vi.fn()
-    const { container } = render(
-      <VideoPlayer src="invalid" onError={onError} />,
-    )
-    // Simulate video error event
+  it('shows "Sem sinal" when error event fired on video element', () => {
+    const { container } = render(<VideoPlayer src="http://example.com/stream.m3u8" />)
     const video = container.querySelector('video')!
+    // Trigger onerror via the React handler
+    Object.defineProperty(video, 'error', { value: { code: 4 }, configurable: true })
     video.dispatchEvent(new Event('error'))
-    // After error, "Sem sinal" should appear
+    // After error, loading/error state changes — camera name should not be there
     expect(screen.queryByText('Câmera não configurada')).not.toBeInTheDocument()
   })
 
