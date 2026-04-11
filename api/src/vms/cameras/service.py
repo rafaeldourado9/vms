@@ -233,10 +233,10 @@ class CameraService:
         )
 
         return StreamUrls(
-            hls_url=f"http://{mediamtx_host}:8888/{path}/index.m3u8?token={viewer_token}",
-            webrtc_url=f"http://{mediamtx_host}:8889/{path}/whep?token={viewer_token}",
+            hls_url=f"/hls/{path}/index.m3u8?token={viewer_token}",
+            webrtc_url=f"/webrtc/{path}/whep?token={viewer_token}",
             rtsp_url=(
-                f"rtsp://{mediamtx_host}:8554/{path}?token={viewer_token}"
+                f"/stream/rtsp/{path}?token={viewer_token}"
                 if camera.stream_protocol != StreamProtocol.RTMP_PUSH
                 else None
             ),
