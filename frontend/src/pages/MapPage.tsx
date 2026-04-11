@@ -1,20 +1,42 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Layers, RefreshCw, Search, Brain, Wifi, WifiOff, MapPin } from 'lucide-react'
-import { GoogleMap, useJsApiLoader, Marker, InfoWindow } from '@react-google-maps/api'
+import {
+  Brain,
+  Calendar,
+  ChevronLeft,
+  ChevronRight,
+  Film,
+  Layers,
+  MapPin,
+  RefreshCw,
+  Search,
+  Wifi,
+  WifiOff,
+  X,
+} from 'lucide-react'
+import { GoogleMap, InfoWindow, Marker, useJsApiLoader } from '@react-google-maps/api'
 import { clsx } from 'clsx'
 import { camerasService } from '@/services/cameras'
+import { recordingsService } from '@/services/recordings'
+import { useAuthStore } from '@/store/authStore'
 import { Thumbnail } from '@/components/camera/Thumbnail'
-import type { Camera } from '@/types'
+import { VideoPlayer } from '@/components/camera/VideoPlayer'
+import type { Camera, RecordingSegment } from '@/types'
 
 const GOOGLE_MAPS_KEY =
   import.meta.env.VITE_GOOGLE_MAPS_KEY ?? import.meta.env.VITE_GOOGLE_MAPS_API_KEY ?? ''
+
+const MINUTES_IN_DAY = 1440
 
 const MAP_STYLE_DARK: google.maps.MapTypeStyle[] = [
   { elementType: 'geometry', stylers: [{ color: '#0f0f18' }] },
   { elementType: 'labels.text.stroke', stylers: [{ color: '#0a0a12' }] },
   { elementType: 'labels.text.fill', stylers: [{ color: '#5a6477' }] },
-  { featureType: 'administrative.locality', elementType: 'labels.text.fill', stylers: [{ color: '#8a93a5' }] },
+  {
+    featureType: 'administrative.locality',
+    elementType: 'labels.text.fill',
+    stylers: [{ color: '#8a93a5' }],
+  },
   { featureType: 'road', elementType: 'geometry', stylers: [{ color: '#1d1d28' }] },
   { featureType: 'road', elementType: 'geometry.stroke', stylers: [{ color: '#16161e' }] },
   { featureType: 'road', elementType: 'labels.text.fill', stylers: [{ color: '#6b7280' }] },
@@ -39,8 +61,26 @@ const createMarkerIcon = (online: boolean, iaEnabled: boolean): google.maps.Symb
   strokeWeight: 2,
 })
 
+function shiftDate(iso: string, days: number): string {
+  const d = new Date(iso + 'T00:00:00')
+  d.setDate(d.getDate() + days)
+  return d.toISOString().split('T')[0]
+}
+
+function formatDateShort(iso: string): string {
+  return new Date(iso + 'T00:00:00').toLocaleDateString('pt-BR', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+  })
+}
+
 export function MapPage() {
   const navigate = useNavigate()
+  const token = useAuthStore((s) => s.tokens?.access_token ?? '')
+  const timelineRef = useRef<HTMLDivElement>(null)
+
+  // ─── Cameras ────────────────────────────────────────────────────────────────
   const [cameras, setCameras] = useState<Camera[]>([])
   const [loading, setLoading] = useState(true)
   const [selected, setSelected] = useState<Camera | null>(null)
@@ -49,11 +89,21 @@ export function MapPage() {
   const [center, setCenter] = useState({ lat: -14.235, lng: -51.925 })
   const [map, setMap] = useState<google.maps.Map | null>(null)
 
+  // ─── Timeline ───────────────────────────────────────────────────────────────
+  const [selDate, setSelDate] = useState(() => new Date().toISOString().split('T')[0])
+  const [segments, setSegments] = useState<RecordingSegment[]>([])
+  const [loadingSegs, setLoadingSegs] = useState(false)
+
+  // ─── VOD playback ───────────────────────────────────────────────────────────
+  const [playbackSeg, setPlaybackSeg] = useState<RecordingSegment | null>(null)
+  const [playbackUrl, setPlaybackUrl] = useState<string | null>(null)
+
   const { isLoaded, loadError } = useJsApiLoader({
     googleMapsApiKey: GOOGLE_MAPS_KEY,
     libraries: ['places'],
   })
 
+  // ─── Load cameras ────────────────────────────────────────────────────────────
   const loadCameras = useCallback(() => {
     setLoading(true)
     camerasService
@@ -74,6 +124,32 @@ export function MapPage() {
     loadCameras()
   }, [loadCameras])
 
+  // ─── Load segments when camera or date changes ───────────────────────────────
+  useEffect(() => {
+    if (!selected) {
+      setSegments([])
+      return
+    }
+    setLoadingSegs(true)
+    setPlaybackSeg(null)
+    setPlaybackUrl(null)
+
+    const start = new Date(selDate + 'T00:00:00').toISOString()
+    const end = new Date(selDate + 'T23:59:59.999').toISOString()
+
+    recordingsService
+      .listSegments({
+        camera_id: selected.id,
+        started_after: start,
+        started_before: end,
+        page_size: 500,
+      })
+      .then((res) => setSegments(res.items ?? []))
+      .catch(() => setSegments([]))
+      .finally(() => setLoadingSegs(false))
+  }, [selected, selDate])
+
+  // ─── Helpers ─────────────────────────────────────────────────────────────────
   const counts = useMemo(
     () => ({
       all: cameras.length,
@@ -99,7 +175,6 @@ export function MapPage() {
   }, [cameras, filter, search])
 
   const visibleWithCoords = visible.filter(hasCoords)
-  const visibleWithoutCoords = visible.filter((c) => !hasCoords(c))
 
   const focusCamera = useCallback(
     (cam: Camera) => {
@@ -112,7 +187,55 @@ export function MapPage() {
     [map],
   )
 
-  // ─── No API key: friendly fallback ──────────────────────────────────────
+  const segmentMinutes = useCallback((seg: RecordingSegment) => {
+    const start = new Date(seg.started_at)
+    const startMin = start.getHours() * 60 + start.getMinutes()
+    const durMin = Math.max(1, Math.ceil(seg.duration_seconds / 60))
+    return { startMin, durMin }
+  }, [])
+
+  const buildPlaybackUrl = useCallback(
+    (seg: RecordingSegment): string | null => {
+      if (!token) return null
+      const url = new URL(seg.file_path, window.location.origin)
+      url.searchParams.set('token', token)
+      return url.toString()
+    },
+    [token],
+  )
+
+  const openSegment = useCallback(
+    (seg: RecordingSegment) => {
+      const url = buildPlaybackUrl(seg)
+      if (url) {
+        setPlaybackSeg(seg)
+        setPlaybackUrl(url)
+      }
+    },
+    [buildPlaybackUrl],
+  )
+
+  const handleTimelineClick = useCallback(
+    (e: React.MouseEvent<HTMLDivElement>) => {
+      if (!timelineRef.current) return
+      const rect = timelineRef.current.getBoundingClientRect()
+      const x = e.clientX - rect.left
+      const minutes = Math.floor((x / rect.width) * MINUTES_IN_DAY)
+      const hit = segments.find((s) => {
+        const { startMin, durMin } = segmentMinutes(s)
+        return minutes >= startMin && minutes <= startMin + durMin
+      })
+      if (hit) openSegment(hit)
+    },
+    [segments, segmentMinutes, openSegment],
+  )
+
+  const closePlayback = useCallback(() => {
+    setPlaybackSeg(null)
+    setPlaybackUrl(null)
+  }, [])
+
+  // ─── No API key fallback ─────────────────────────────────────────────────────
   if (!GOOGLE_MAPS_KEY) {
     return (
       <div className="-m-4 h-[calc(100vh-3.5rem)] flex items-center justify-center p-8">
@@ -121,27 +244,20 @@ export function MapPage() {
           <p className="text-t2 font-medium">Google Maps não configurado</p>
           <p className="text-xs text-t3">
             Defina <code className="text-accent">VITE_GOOGLE_MAPS_KEY</code> no{' '}
-            <code>frontend/.env</code> e reconstrua o container frontend:
+            <code>frontend/.env</code> e reconstrua o container frontend.
           </p>
-          <pre
-            className="text-[11px] font-mono rounded-lg p-3 mt-1 text-left text-t2"
-            style={{ background: 'var(--elevated)' }}
-          >
-            docker compose build frontend{'\n'}docker compose up -d frontend
-          </pre>
         </div>
       </div>
     )
   }
 
-  // ─── Full-bleed map + right overlay panel ───────────────────────────────
   return (
     <div className="-m-4 h-[calc(100vh-3.5rem)] relative overflow-hidden">
-      {/* Map as background */}
+      {/* ── Map background ────────────────────────────────────────────────── */}
       <div className="absolute inset-0">
         {loadError ? (
           <div className="h-full w-full flex items-center justify-center text-sm text-t3">
-            Erro ao carregar Google Maps: {String(loadError.message ?? loadError)}
+            Erro ao carregar Google Maps
           </div>
         ) : !isLoaded ? (
           <div
@@ -174,12 +290,12 @@ export function MapPage() {
                 key={cam.id}
                 position={{ lat: cam.latitude, lng: cam.longitude }}
                 icon={createMarkerIcon(cam.is_online, cam.ia_enabled === true)}
-                onClick={() => setSelected(cam)}
+                onClick={() => focusCamera(cam)}
                 title={cam.name}
               />
             ))}
 
-            {selected && hasCoords(selected) && (
+            {selected && hasCoords(selected) && !playbackSeg && (
               <InfoWindow
                 position={{ lat: selected.latitude, lng: selected.longitude }}
                 onCloseClick={() => setSelected(null)}
@@ -194,14 +310,11 @@ export function MapPage() {
         )}
       </div>
 
-      {/* Top-left floating filter chips */}
-      <div className="absolute top-4 left-4 z-10 flex items-center gap-2 max-w-[calc(100%-24rem)]">
+      {/* ── Top-left filter chips ─────────────────────────────────────────── */}
+      <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
         <div
           className="flex items-center gap-1 p-1 rounded-xl shadow-xl backdrop-blur"
-          style={{
-            background: 'rgba(17,17,24,0.85)',
-            border: '1px solid var(--border)',
-          }}
+          style={{ background: 'rgba(17,17,24,0.85)', border: '1px solid var(--border)' }}
         >
           {(
             [
@@ -228,7 +341,144 @@ export function MapPage() {
         </div>
       </div>
 
-      {/* Right floating list panel */}
+      {/* ── Bottom timeline panel (aparece quando câmera selecionada) ─────── */}
+      {selected && (
+        <div
+          className="absolute bottom-4 left-4 z-10 rounded-2xl shadow-2xl backdrop-blur overflow-hidden"
+          style={{
+            right: 'calc(1rem + 20rem + 1rem)', // gap + sidebar width + right margin
+            background: 'rgba(17,17,24,0.92)',
+            border: '1px solid var(--border)',
+          }}
+        >
+          {/* Timeline header */}
+          <div
+            className="flex items-center gap-3 px-4 py-2.5 border-b"
+            style={{ borderColor: 'var(--border)' }}
+          >
+            <Film size={14} className="text-accent shrink-0" />
+            <p className="text-xs font-semibold text-t1 truncate flex-1">{selected.name}</p>
+
+            {/* Date navigation */}
+            <div className="flex items-center gap-1 shrink-0">
+              <button
+                className="w-6 h-6 flex items-center justify-center rounded hover:bg-elevated transition text-t2"
+                onClick={() => setSelDate((d) => shiftDate(d, -1))}
+              >
+                <ChevronLeft size={13} />
+              </button>
+              <div className="flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] text-t2 tabular-nums"
+                style={{ background: 'var(--elevated)' }}>
+                <Calendar size={10} className="text-t3" />
+                {formatDateShort(selDate)}
+              </div>
+              <button
+                className="w-6 h-6 flex items-center justify-center rounded hover:bg-elevated transition text-t2"
+                onClick={() => setSelDate((d) => shiftDate(d, 1))}
+                disabled={selDate >= new Date().toISOString().split('T')[0]}
+              >
+                <ChevronRight size={13} />
+              </button>
+            </div>
+
+            <span className="text-[10px] text-t3 tabular-nums shrink-0">
+              {loadingSegs ? '…' : `${segments.length} seg.`}
+            </span>
+
+            <button
+              className="w-6 h-6 flex items-center justify-center rounded hover:bg-elevated transition text-t3 hover:text-t1 shrink-0"
+              onClick={() => setSelected(null)}
+            >
+              <X size={13} />
+            </button>
+          </div>
+
+          {/* 24h bar */}
+          <div className="px-4 py-3 space-y-1.5">
+            <div className="flex justify-between text-[9px] text-t3 tabular-nums select-none px-px">
+              <span>00:00</span>
+              <span>06:00</span>
+              <span>12:00</span>
+              <span>18:00</span>
+              <span>24:00</span>
+            </div>
+            <div
+              ref={timelineRef}
+              className="relative h-7 rounded-lg overflow-hidden cursor-crosshair"
+              style={{ background: 'var(--elevated)' }}
+              onClick={handleTimelineClick}
+            >
+              {/* Hour ticks */}
+              {Array.from({ length: 23 }, (_, i) => i + 1).map((h) => (
+                <div
+                  key={h}
+                  className="absolute top-0 bottom-0 w-px opacity-30"
+                  style={{ left: `${(h / 24) * 100}%`, background: 'var(--border)' }}
+                />
+              ))}
+
+              {/* Segments */}
+              {segments.map((seg) => {
+                const { startMin, durMin } = segmentMinutes(seg)
+                const isActive = playbackSeg?.id === seg.id
+                return (
+                  <div
+                    key={seg.id}
+                    className="absolute top-1 bottom-1 rounded-sm cursor-pointer transition hover:opacity-100"
+                    style={{
+                      left: `${(startMin / MINUTES_IN_DAY) * 100}%`,
+                      width: `${Math.max(0.2, (durMin / MINUTES_IN_DAY) * 100)}%`,
+                      background: isActive ? '#10b981' : 'var(--accent)',
+                      opacity: isActive ? 1 : 0.8,
+                      boxShadow: isActive ? '0 0 0 1px #10b981' : undefined,
+                    }}
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      openSegment(seg)
+                    }}
+                    title={`${new Date(seg.started_at).toLocaleTimeString('pt-BR')} · ${Math.round(seg.duration_seconds)}s`}
+                  />
+                )
+              })}
+
+              {segments.length === 0 && !loadingSegs && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="text-[10px] text-t3">Sem gravações neste dia</span>
+                </div>
+              )}
+
+              {loadingSegs && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <span className="text-[10px] text-t3 animate-pulse">Carregando…</span>
+                </div>
+              )}
+            </div>
+
+            {/* Hint */}
+            {segments.length > 0 && !playbackSeg && (
+              <p className="text-[9px] text-t3 text-center">
+                Clique em um segmento para reproduzir
+              </p>
+            )}
+            {playbackSeg && (
+              <p className="text-[9px] text-accent text-center tabular-nums">
+                Reproduzindo{' '}
+                {new Date(playbackSeg.started_at).toLocaleTimeString('pt-BR', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+                {' — '}
+                {new Date(playbackSeg.ended_at).toLocaleTimeString('pt-BR', {
+                  hour: '2-digit',
+                  minute: '2-digit',
+                })}
+              </p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ── Right sidebar ─────────────────────────────────────────────────── */}
       <aside
         className="absolute top-4 right-4 bottom-4 w-80 rounded-2xl shadow-2xl flex flex-col overflow-hidden z-10 backdrop-blur"
         style={{
@@ -245,7 +495,6 @@ export function MapPage() {
             <p className="text-sm font-semibold text-t1">Câmeras</p>
             <p className="text-[10px] text-t3">
               {visible.length} de {cameras.length}
-              {visibleWithoutCoords.length > 0 && ` · ${visibleWithoutCoords.length} sem GPS`}
             </p>
           </div>
           <button
@@ -261,10 +510,7 @@ export function MapPage() {
         {/* Search */}
         <div className="px-4 py-2 border-b shrink-0" style={{ borderColor: 'var(--border)' }}>
           <div className="relative">
-            <Search
-              size={12}
-              className="absolute left-2.5 top-1/2 -translate-y-1/2 text-t3"
-            />
+            <Search size={12} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-t3" />
             <input
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -299,7 +545,6 @@ export function MapPage() {
                     {/* Thumbnail */}
                     <div className="relative aspect-video bg-black">
                       <Thumbnail cameraId={cam.id} className="w-full h-full" />
-                      {/* Status dot overlay */}
                       <div
                         className={clsx(
                           'absolute top-1.5 right-1.5 w-2 h-2 rounded-full shadow',
@@ -310,7 +555,6 @@ export function MapPage() {
                             : 'bg-red-500',
                         )}
                       />
-                      {/* No-GPS badge */}
                       {!coords && (
                         <span
                           className="absolute top-1.5 left-1.5 text-[9px] px-1 rounded text-amber-500"
@@ -319,6 +563,12 @@ export function MapPage() {
                         >
                           sem GPS
                         </span>
+                      )}
+                      {isActive && (
+                        <div
+                          className="absolute bottom-0 left-0 right-0 h-0.5"
+                          style={{ background: 'var(--accent)' }}
+                        />
                       )}
                     </div>
 
@@ -375,11 +625,118 @@ export function MapPage() {
               <span className="w-1.5 h-1.5 rounded-full bg-red-500" /> Off
             </span>
           </div>
+          {selected && (
+            <span className="text-accent text-[9px]">
+              {segments.length} gravações
+            </span>
+          )}
         </div>
       </aside>
+
+      {/* ── VOD Popup (floating over map) ─────────────────────────────────── */}
+      {playbackSeg && playbackUrl && (
+        <div
+          className="absolute inset-0 z-20 flex items-center justify-center"
+          style={{ background: 'rgba(0,0,0,0.65)', backdropFilter: 'blur(4px)' }}
+          onClick={closePlayback}
+        >
+          <div
+            className="rounded-2xl overflow-hidden shadow-2xl flex flex-col"
+            style={{
+              width: 'min(760px, calc(100vw - 24rem - 3rem))',
+              background: 'rgba(17,17,24,0.97)',
+              border: '1px solid var(--border)',
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Popup header */}
+            <div
+              className="flex items-center gap-3 px-4 py-3 border-b"
+              style={{ borderColor: 'var(--border)' }}
+            >
+              <Film size={14} className="text-accent shrink-0" />
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-t1 truncate">{selected?.name}</p>
+                <p className="text-[10px] text-t3 tabular-nums">
+                  {new Date(playbackSeg.started_at).toLocaleString('pt-BR', {
+                    day: '2-digit', month: '2-digit', year: 'numeric',
+                    hour: '2-digit', minute: '2-digit', second: '2-digit',
+                  })}
+                  {' — '}
+                  {new Date(playbackSeg.ended_at).toLocaleTimeString('pt-BR', {
+                    hour: '2-digit', minute: '2-digit', second: '2-digit',
+                  })}
+                  {' · '}
+                  {Math.round(playbackSeg.duration_seconds)}s
+                </p>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  className="text-xs text-accent hover:text-t1 transition"
+                  onClick={() => selected && navigate(`/cameras/${selected.id}`)}
+                >
+                  Ver câmera →
+                </button>
+                <button
+                  className="w-7 h-7 flex items-center justify-center rounded-lg hover:bg-elevated transition text-t3 hover:text-t1"
+                  onClick={closePlayback}
+                >
+                  <X size={14} />
+                </button>
+              </div>
+            </div>
+
+            {/* Player */}
+            <VideoPlayer
+              src={playbackUrl}
+              name={selected?.name}
+              autoPlay
+              muted={false}
+              className="w-full aspect-video"
+            />
+
+            {/* Segment strip — click other segments */}
+            {segments.length > 1 && (
+              <div
+                className="px-4 py-2 border-t flex items-center gap-2 overflow-x-auto"
+                style={{ borderColor: 'var(--border)' }}
+              >
+                <span className="text-[9px] text-t3 shrink-0">Segmentos:</span>
+                {segments
+                  .slice()
+                  .sort((a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime())
+                  .map((seg) => {
+                    const isActive = playbackSeg.id === seg.id
+                    return (
+                      <button
+                        key={seg.id}
+                        onClick={() => openSegment(seg)}
+                        className={clsx(
+                          'shrink-0 text-[9px] px-2 py-1 rounded-md tabular-nums transition',
+                          isActive
+                            ? 'text-white'
+                            : 'text-t3 hover:text-t1 hover:bg-elevated',
+                        )}
+                        style={isActive ? { background: 'var(--accent)' } : {}}
+                      >
+                        {new Date(seg.started_at).toLocaleTimeString('pt-BR', {
+                          hour: '2-digit',
+                          minute: '2-digit',
+                        })}
+                      </button>
+                    )
+                  })}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   )
 }
+
+// ─── InfoWindow popup (map marker click) ───────────────────────────────────────
 
 function InfoWindowContent({ cam, onNavigate }: { cam: Camera; onNavigate: () => void }) {
   return (
@@ -393,7 +750,16 @@ function InfoWindowContent({ cam, onNavigate }: { cam: Camera; onNavigate: () =>
       }}
     >
       {/* Thumbnail */}
-      <div style={{ position: 'relative', aspectRatio: '16/9', borderRadius: 6, overflow: 'hidden', marginBottom: 10, background: '#000' }}>
+      <div
+        style={{
+          position: 'relative',
+          aspectRatio: '16/9',
+          borderRadius: 6,
+          overflow: 'hidden',
+          marginBottom: 10,
+          background: '#000',
+        }}
+      >
         <Thumbnail cameraId={cam.id} className="w-full h-full" />
         <div
           style={{
