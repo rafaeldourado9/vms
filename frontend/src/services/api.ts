@@ -10,6 +10,8 @@ const _apiBase = import.meta.env.VITE_API_URL
 export const api: AxiosInstance = axios.create({
   baseURL: _apiBase,
   headers: { 'Content-Type': 'application/json' },
+  // Desativar logs de debug do axios
+  transformResponse: axios.defaults.transformResponse,
 })
 
 api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
@@ -35,10 +37,11 @@ api.interceptors.response.use(
         return Promise.reject(err)
       }
 
+      // Evita múltiplas requisições de refresh simultâneas
       if (!_refreshing) {
         _refreshing = (async (): Promise<string | null> => {
           try {
-            const res = await axios.post<{ access_token: string; refresh_token: string; token_type: string; expires_in: number }>(
+            const res = await axios.post<{ access_token: string; refresh_token: string }>(
               '/api/v1/auth/refresh',
               { refresh_token: refreshToken },
             )

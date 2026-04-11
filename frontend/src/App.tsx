@@ -17,6 +17,23 @@ import { NotificationsPage }   from '@/pages/NotificationsPage'
 import { UsersPage }           from '@/pages/UsersPage'
 import { SettingsPage }        from '@/pages/SettingsPage'
 
+// ─── Proteções de segurança no frontend ───────────────────────────────────────
+
+// Desabilitar menu de contexto em produção (previne inspeção casual)
+if (import.meta.env.PROD) {
+  // Desabilitar atalhos de devtools
+  document.addEventListener('keydown', (e) => {
+    // F12, Ctrl+Shift+I, Ctrl+Shift+J, Ctrl+U
+    if (
+      e.key === 'F12' ||
+      (e.ctrlKey && e.shiftKey && (e.key === 'I' || e.key === 'J')) ||
+      (e.ctrlKey && e.key === 'U')
+    ) {
+      e.preventDefault()
+    }
+  })
+}
+
 function RequireAuth() {
   const { isAuthenticated } = useAuthStore()
   if (!isAuthenticated()) return <Navigate to="/login" replace />
@@ -52,7 +69,12 @@ function AuthenticatedApp() {
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter
+      future={{
+        v7_startTransition: true,
+        v7_relativeSplatPath: true,
+      }}
+    >
       <Toaster
         position="top-right"
         toastOptions={{
@@ -65,6 +87,7 @@ export default function App() {
           },
           success: { iconTheme: { primary: '#22C55E', secondary: '#111118' } },
           error:   { iconTheme: { primary: '#EF4444', secondary: '#111118' } },
+          duration: 3000,
         }}
       />
       <Routes>

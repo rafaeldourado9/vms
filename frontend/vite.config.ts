@@ -20,6 +20,13 @@ export default defineConfig({
       '/webhooks':  API_TARGET,
     },
   },
+  build: {
+    sourcemap: false,
+    minify: 'esbuild',
+  },
+  esbuild: {
+    drop: ['console', 'debugger'],
+  },
   test: {
     globals: true,
     environment: 'jsdom',
