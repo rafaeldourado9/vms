@@ -7,7 +7,7 @@ from typing import Protocol
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from vms.cameras.domain import Agent, AgentStatus, Camera, CameraManufacturer, StreamProtocol
+from vms.cameras.domain import Agent, AgentStatus, Camera, CameraManufacturer, StreamProtocol, StreamQuality
 from vms.cameras.models import AgentModel, CameraModel
 
 
@@ -17,6 +17,9 @@ class CameraRepositoryPort(Protocol):
     """Interface do repositório de câmeras."""
 
     async def get_by_id(self, camera_id: str, tenant_id: str) -> Camera | None: ...
+    async def get_by_stream_key(self, stream_key: str) -> Camera | None: ...
+    async def get_by_name(self, name: str, tenant_id: str, only_active: bool = True) -> Camera | None: ...
+    async def get_by_rtsp_url(self, rtsp_url: str, tenant_id: str, only_active: bool = True) -> Camera | None: ...
     async def list_by_tenant(
         self, tenant_id: str, is_online: bool | None = None
     ) -> list[Camera]: ...
@@ -49,12 +52,18 @@ def _camera_to_domain(m: CameraModel) -> Camera:
         onvif_url=m.onvif_url,
         onvif_username=m.onvif_username,
         onvif_password=m.onvif_password,
-        manufacturer=CameraManufacturer(m.manufacturer),
+        manufacturer=CameraManufacturer(m.manufacturer if m.manufacturer in CameraManufacturer._value2member_map_ else "generic"),
         location=m.location,
+        address=m.address,
+        latitude=m.latitude,
+        longitude=m.longitude,
+        ia_enabled=m.ia_enabled,
         agent_id=m.agent_id,
         retention_days=m.retention_days,
+        stream_quality=StreamQuality(getattr(m, "stream_quality", "high") or "high"),
         is_active=m.is_active,
         is_online=m.is_online,
+        ptz_supported=m.ptz_supported,
         last_seen_at=m.last_seen_at,
         created_at=m.created_at,
     )
@@ -89,6 +98,51 @@ class CameraRepository:
             CameraModel.id == camera_id,
             CameraModel.tenant_id == tenant_id,
         )
+        result = await self._session.scalar(stmt)
+        return _camera_to_domain(result) if result else None
+
+    async def get_by_stream_key(self, stream_key: str) -> Camera | None:
+        """Busca câmera RTMP push pelo stream_key (sem filtro de tenant)."""
+        stmt = select(CameraModel).where(
+            CameraModel.rtmp_stream_key == stream_key,
+            CameraModel.is_active.is_(True),
+        )
+        result = await self._session.scalar(stmt)
+        return _camera_to_domain(result) if result else None
+
+    async def get_by_name(self, name: str, tenant_id: str, only_active: bool = True) -> Camera | None:
+        """Busca câmera por nome dentro do tenant.
+        
+        Args:
+            name: Nome da câmera
+            tenant_id: ID do tenant
+            only_active: Se True, busca apenas câmeras ativas. 
+                        Se False, busca todas (útil para validação de unicidade).
+        """
+        stmt = select(CameraModel).where(
+            CameraModel.name == name,
+            CameraModel.tenant_id == tenant_id,
+        )
+        if only_active:
+            stmt = stmt.where(CameraModel.is_active.is_(True))
+        result = await self._session.scalar(stmt)
+        return _camera_to_domain(result) if result else None
+
+    async def get_by_rtsp_url(self, rtsp_url: str, tenant_id: str, only_active: bool = True) -> Camera | None:
+        """Busca câmera por RTSP URL dentro do tenant.
+        
+        Args:
+            rtsp_url: URL RTSP da câmera
+            tenant_id: ID do tenant
+            only_active: Se True, busca apenas câmeras ativas.
+                        Se False, busca todas (útil para validação de unicidade).
+        """
+        stmt = select(CameraModel).where(
+            CameraModel.rtsp_url == rtsp_url,
+            CameraModel.tenant_id == tenant_id,
+        )
+        if only_active:
+            stmt = stmt.where(CameraModel.is_active.is_(True))
         result = await self._session.scalar(stmt)
         return _camera_to_domain(result) if result else None
 
@@ -129,10 +183,16 @@ class CameraRepository:
             onvif_password=camera.onvif_password,
             manufacturer=camera.manufacturer.value,
             location=camera.location,
+            address=camera.address,
+            latitude=camera.latitude,
+            longitude=camera.longitude,
+            ia_enabled=camera.ia_enabled,
             agent_id=camera.agent_id,
             retention_days=camera.retention_days,
+            stream_quality=camera.stream_quality.value,
             is_active=camera.is_active,
             is_online=camera.is_online,
+            ptz_supported=camera.ptz_supported,
         )
         self._session.add(model)
         await self._session.flush()
@@ -156,10 +216,16 @@ class CameraRepository:
                 onvif_password=camera.onvif_password,
                 manufacturer=camera.manufacturer.value,
                 location=camera.location,
+                address=camera.address,
+                latitude=camera.latitude,
+                longitude=camera.longitude,
+                ia_enabled=camera.ia_enabled,
                 agent_id=camera.agent_id,
                 retention_days=camera.retention_days,
+                stream_quality=camera.stream_quality.value,
                 is_active=camera.is_active,
                 is_online=camera.is_online,
+                ptz_supported=camera.ptz_supported,
                 last_seen_at=camera.last_seen_at,
             )
         )

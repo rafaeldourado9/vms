@@ -84,7 +84,7 @@ async def read_auth(body: ReadAuthRequest, db: DbSession) -> PublishAuthResponse
 @router.get(
     "/streaming/auth-check",
     status_code=status.HTTP_200_OK,
-    summary="Nginx auth_request — valida viewer token",
+    summary="Nginx auth_request — valida viewer token para HLS/WebRTC",
     tags=["streaming"],
     include_in_schema=False,
 )

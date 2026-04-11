@@ -40,6 +40,13 @@ class Settings(BaseSettings):
     mediamtx_api_url: str = Field(default="http://localhost:9997")
     mediamtx_rtmp_url: str = Field(default="rtmp://localhost:1935")
 
+    # URL pública RTMP exposta ao integrador (câmeras RTMP push)
+    # Em produção: rtmp://vms.seudominio.com.br:1935
+    rtmp_public_url: str = Field(default="rtmp://localhost:1935")
+
+    # Host interno do MediaMTX para captura de thumbnails via HLS
+    mediamtx_hls_url: str = Field(default="http://mediamtx:8888")
+
     # ─── Analytics ────────────────────────────────────────────────────────
     analytics_api_key: str = Field(default="dev-analytics-key")
 

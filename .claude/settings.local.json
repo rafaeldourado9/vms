@@ -1,0 +1,9 @@
+{
+  "permissions": {
+    "allow": [
+      "Read(//d/so/vms/mvp/frontend/src/services//**)",
+      "Read(//d/so/vms/mvp/frontend/src/store//**)",
+      "Read(//d/so/vms/mvp/frontend/src/hooks//**)"
+    ]
+  }
+}

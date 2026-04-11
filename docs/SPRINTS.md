@@ -115,16 +115,16 @@
 > PTZ (Pan-Tilt-Zoom) via ONVIF para câmeras que suportam.
 > Implementar se cliente tiver demanda antes do MVP. Caso contrário: pós-MVP.
 
-- [ ] `ptz/domain.py` — PtzCommand, PtzPreset, PtzCapabilities
-- [ ] `ptz/service.py` — ContinuousMove, AbsoluteMove, GotoPreset via ONVIF
-- [ ] `ptz/router.py`:
+- [x] `ptz/domain.py` — PtzCommand, PtzPreset, PtzCapabilities
+- [x] `ptz/service.py` — ContinuousMove, AbsoluteMove, GotoPreset via ONVIF
+- [x] `ptz/router.py`:
   - `POST /api/v1/cameras/{id}/ptz/move` — move contínuo (pan/tilt/zoom + speed + stop)
   - `POST /api/v1/cameras/{id}/ptz/stop` — para movimento
   - `GET /api/v1/cameras/{id}/ptz/presets` — lista presets
   - `POST /api/v1/cameras/{id}/ptz/presets/{n}/goto` — goto preset
   - `POST /api/v1/cameras/{id}/ptz/presets/{n}/save` — salva posição atual como preset
-- [ ] `tests/unit/ptz/test_service.py` — mock ONVIF PTZ service
-- [ ] Checar `cameras/domain.py` — adicionar `ptz_supported: bool` à Camera
+- [x] `tests/unit/ptz/test_service.py` — mock ONVIF PTZ service
+- [x] Checar `cameras/domain.py` — adicionar `ptz_supported: bool` à Camera
 
 **Critério de aceite:** Move command → câmera se move; goto preset funciona
 

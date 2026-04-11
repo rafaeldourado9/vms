@@ -17,9 +17,9 @@ interface ListClipsParams {
 
 interface CreateClipData {
   camera_id: string
-  name: string
-  started_at: string
-  ended_at: string
+  starts_at: string
+  ends_at: string
+  vms_event_id?: string
 }
 
 interface SegmentListResponse {
@@ -61,6 +61,13 @@ export const recordingsService = {
 
   async listClips(params?: ListClipsParams): Promise<ClipListResponse> {
     const res = await api.get<ClipListResponse>('/recordings/clips', { params })
+    return res.data
+  },
+
+  async downloadUrl(recordingId: string): Promise<{ download_url: string; file_path: string }> {
+    const res = await api.get<{ download_url: string; file_path: string }>(
+      `/recordings/${recordingId}/download`,
+    )
     return res.data
   },
 }

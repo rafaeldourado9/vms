@@ -1,4 +1,7 @@
-FROM bluenviron/mediamtx:latest
+FROM bluenviron/mediamtx:latest-ffmpeg
+
+# curl é necessário para os hooks runOnReady / runOnNotReady / runOnRecordSegmentComplete
+RUN apk add --no-cache curl
 
 # Copia configuração customizada
 COPY mediamtx.yml /mediamtx.yml

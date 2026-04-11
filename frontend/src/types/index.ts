@@ -33,7 +33,8 @@ export interface Tenant {
 
 export type StreamProtocol = 'rtsp_pull' | 'rtmp_push' | 'onvif'
 
-export type CameraManufacturer = 'generic' | 'hikvision' | 'intelbras' | 'axis' | 'dahua'
+export type CameraManufacturer = 'generic' | 'hikvision' | 'intelbras'
+export type StreamQuality = 'low' | 'medium' | 'high' | 'source'
 
 export interface Camera {
   id: string
@@ -47,11 +48,16 @@ export interface Camera {
   onvif_username: string | null
   manufacturer: string
   retention_days: number
+  stream_quality: StreamQuality
   is_active: boolean
   is_online: boolean
-  agent_id: string | null
   last_seen_at: string | null
   created_at: string
+  latitude?: number | null
+  longitude?: number | null
+  address?: string | null
+  ia_enabled?: boolean
+  ptz_supported?: boolean
 }
 
 export interface StreamUrls {
@@ -92,42 +98,16 @@ export interface CameraConfigItem {
   stream_path: string
 }
 
-// ─── ROI ─────────────────────────────────────────────────────────────────────
-
-export type ROIType =
-  | 'intrusion'
-  | 'people_count'
-  | 'vehicle_count'
-  | 'lpr_parking'
-  | 'weapon_detection'
-  | 'face_recognition'
-  | 'vehicle_dwell'
-
-export interface ROI {
-  id: string
-  tenant_id: string
-  camera_id: string
-  name: string
-  ia_type: ROIType
-  polygon_points: number[][]
-  config: Record<string, unknown>
-  is_active: boolean
-  created_at: string
-}
-
 // ─── Events ──────────────────────────────────────────────────────────────────
 
 export interface VmsEvent {
   id: string
-  tenant_id: string
-  camera_id: string
+  camera_id: string | null
   event_type: string
   plate: string | null
-  manufacturer: string | null
-  raw_payload: Record<string, unknown>
-  deduplicated: boolean
+  confidence: number | null
+  payload: Record<string, unknown>
   occurred_at: string
-  created_at: string
 }
 
 // ─── Recordings ──────────────────────────────────────────────────────────────

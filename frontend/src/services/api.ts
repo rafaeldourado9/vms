@@ -3,8 +3,12 @@ import { useAuthStore } from '@/store/authStore'
 
 let _refreshing: Promise<string | null> | null = null
 
+const _apiBase = import.meta.env.VITE_API_URL
+  ? `${import.meta.env.VITE_API_URL}/api/v1`
+  : '/api/v1'
+
 export const api: AxiosInstance = axios.create({
-  baseURL: '/api/v1',
+  baseURL: _apiBase,
   headers: { 'Content-Type': 'application/json' },
 })
 

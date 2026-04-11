@@ -1,5 +1,5 @@
 import { api } from './api'
-import type { Camera, StreamUrls, RtmpConfig } from '@/types'
+import type { Camera, StreamUrls, RtmpConfig, StreamQuality } from '@/types'
 
 interface ListCamerasParams {
   page?: number
@@ -10,11 +10,15 @@ interface ListCamerasParams {
 interface CreateCameraData {
   name: string
   location?: string
+  address?: string
+  latitude?: number
+  longitude?: number
+  ia_enabled?: boolean
   manufacturer?: string
   retention_days?: number
+  stream_quality?: StreamQuality
   stream_protocol: string
   rtsp_url?: string
-  agent_id?: string
   onvif_url?: string
   onvif_username?: string
   onvif_password?: string
@@ -23,13 +27,16 @@ interface CreateCameraData {
 interface UpdateCameraData {
   name?: string
   location?: string
+  address?: string
+  latitude?: number | null
+  longitude?: number | null
+  ia_enabled?: boolean
   rtsp_url?: string
   onvif_url?: string
   onvif_username?: string
   onvif_password?: string
   manufacturer?: string
   retention_days?: number
-  agent_id?: string
   is_active?: boolean
 }
 
@@ -63,9 +70,9 @@ export const camerasService = {
     return res.data
   },
 
-  async snapshot(id: string): Promise<Blob> {
-    const res = await api.get(`/cameras/${id}/snapshot`, { responseType: 'blob' })
-    return res.data
+  async snapshot(id: string): Promise<string | null> {
+    const res = await api.get<{ snapshot_url: string | null }>(`/cameras/${id}/snapshot`)
+    return res.data.snapshot_url
   },
 
   async rtmpConfig(id: string): Promise<RtmpConfig> {

@@ -11,9 +11,9 @@ interface ThemeState {
 export const useThemeStore = create<ThemeState>()(
   persist(
     (set) => ({
-      accentColor: '#3B82F6',
+      accentColor: import.meta.env.VITE_ACCENT_COLOR ?? '#3B82F6',
       logoUrl: null,
-      systemName: 'VMS',
+      systemName: import.meta.env.VITE_APP_NAME ?? 'VMS',
 
       setTheme: ({ accentColor, logoUrl, systemName }) => {
         set((s) => ({

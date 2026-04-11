@@ -13,6 +13,10 @@ from vms.recordings.repository import ClipRepositoryPort, RecordingSegmentReposi
 logger = logging.getLogger(__name__)
 
 _PATH_RE = re.compile(r"tenant-(?P<tenant_id>[^/]+)/cam-(?P<camera_id>.+)")
+_LIVE_RE = re.compile(r"live/(?P<stream_key>[^/]+?)(?:\.stream)?$")
+_DATETIME_PATH_RE = re.compile(
+    r"/(\d{4})/(\d{2})/(\d{2})/(\d{2})-(\d{2})-(\d{2})\.mp4$"
+)
 
 
 class RecordingService:
@@ -98,7 +102,13 @@ def _resolve_ids(
     tenant_id: str,
     camera_id: str,
 ) -> tuple[str, str]:
-    """Extrai IDs do path MediaMTX se não fornecidos."""
+    """
+    Extrai IDs do path MediaMTX se não fornecidos.
+
+    Suporta dois formatos:
+    - tenant-{tid}/cam-{cid}  → extrai tenant_id e camera_id diretamente
+    - live/{stream_key}       → IDs devem ser fornecidos explicitamente (pelo webhook)
+    """
     if tenant_id and camera_id:
         return tenant_id, camera_id
     match = _PATH_RE.match(mediamtx_path)
@@ -110,10 +120,23 @@ def _resolve_ids(
 def _parse_file_metadata(
     file_path: str,
 ) -> tuple[datetime, datetime, float, int]:
-    """Extrai metadados básicos do arquivo de segmento."""
+    """Extrai metadados básicos do arquivo de segmento.
+
+    Parseia o timestamp real do path MediaMTX: /YYYY/MM/DD/HH-MM-SS.mp4
+    Corrige double extension (.mp4.mp4) se presente.
+    Garante path absoluto com leading slash.
+    """
     now = datetime.now(UTC)
     size = 0
     duration = 60.0
+
+    # Corrige double extension: MediaMTX às vezes adiciona .mp4 extra
+    if file_path.endswith(".mp4.mp4"):
+        file_path = file_path[:-4]
+
+    # Garante path absoluto
+    if not file_path.startswith("/"):
+        file_path = f"/{file_path}"
 
     try:
         stat = os.stat(file_path)
@@ -121,5 +144,14 @@ def _parse_file_metadata(
     except OSError:
         pass
 
-    started_at = now - timedelta(seconds=duration)
-    return started_at, now, duration, size
+    # Parseia timestamp do path: /recordings/tenant-X/cam-Y/YYYY/MM/DD/HH-MM-SS.mp4
+    m = _DATETIME_PATH_RE.search(file_path)
+    if m:
+        y, mo, d, h, mi, s = map(int, m.groups())
+        started_at = datetime(y, mo, d, h, mi, s, tzinfo=UTC)
+        ended_at = started_at + timedelta(seconds=duration)
+    else:
+        started_at = now - timedelta(seconds=duration)
+        ended_at = now
+
+    return started_at, ended_at, duration, size

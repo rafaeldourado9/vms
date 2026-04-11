@@ -4,9 +4,9 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
-from vms.cameras.domain import StreamProtocol
+from vms.cameras.domain import StreamProtocol, StreamQuality
 
 
 class CreateCameraRequest(BaseModel):
@@ -14,8 +14,13 @@ class CreateCameraRequest(BaseModel):
 
     name: str = Field(..., min_length=1, max_length=255)
     location: str | None = Field(default=None, max_length=500)
+    address: str | None = Field(default=None, max_length=500)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    ia_enabled: bool = False
     manufacturer: str = Field(default="generic")
     retention_days: int = Field(default=7, ge=1, le=90)
+    stream_quality: StreamQuality = StreamQuality.HIGH
     stream_protocol: StreamProtocol = StreamProtocol.RTSP_PULL
 
     # rtsp_pull / onvif
@@ -26,6 +31,20 @@ class CreateCameraRequest(BaseModel):
     onvif_url: str | None = Field(default=None, min_length=7, max_length=2000)
     onvif_username: str | None = Field(default=None, max_length=255)
     onvif_password: str | None = Field(default=None, max_length=500)
+
+    @field_validator("rtsp_url", mode="before")
+    @classmethod
+    def sanitize_rtsp_url(cls, v: str | None) -> str | None:
+        """Garante que rtsp_url é uma única URL válida, sem espaços ou quebras."""
+        if v is None:
+            return v
+        # Pega apenas a primeira token não-vazio (evita colagem de múltiplas URLs)
+        first = v.strip().split()[0] if v.strip() else v
+        if not first.startswith(("rtsp://", "rtmp://", "http://", "https://")):
+            raise ValueError(
+                "rtsp_url deve ser uma URL válida iniciando com rtsp://, rtmp://, http:// ou https://"
+            )
+        return first
 
     @model_validator(mode="after")
     def _validate_protocol_fields(self) -> "CreateCameraRequest":
@@ -44,7 +63,25 @@ class UpdateCameraRequest(BaseModel):
 
     name: str | None = Field(default=None, min_length=1, max_length=255)
     location: str | None = None
+    address: str | None = Field(default=None, max_length=500)
+    latitude: float | None = Field(default=None, ge=-90, le=90)
+    longitude: float | None = Field(default=None, ge=-180, le=180)
+    ia_enabled: bool | None = None
+    stream_quality: StreamQuality | None = None
     rtsp_url: str | None = Field(default=None, min_length=10, max_length=2000)
+
+    @field_validator("rtsp_url", mode="before")
+    @classmethod
+    def sanitize_rtsp_url(cls, v: str | None) -> str | None:
+        """Garante que rtsp_url é uma única URL válida."""
+        if v is None:
+            return v
+        first = v.strip().split()[0] if v.strip() else v
+        if not first.startswith(("rtsp://", "rtmp://", "http://", "https://")):
+            raise ValueError(
+                "rtsp_url deve ser uma URL válida iniciando com rtsp://, rtmp://, http:// ou https://"
+            )
+        return first
     onvif_url: str | None = Field(default=None, min_length=7, max_length=2000)
     onvif_username: str | None = Field(default=None, max_length=255)
     onvif_password: str | None = Field(default=None, max_length=500)
@@ -63,6 +100,10 @@ class CameraResponse(BaseModel):
     tenant_id: str
     name: str
     location: str | None
+    address: str | None
+    latitude: float | None
+    longitude: float | None
+    ia_enabled: bool
     stream_protocol: str
     rtsp_url: str | None
     rtmp_stream_key: str | None
@@ -70,8 +111,10 @@ class CameraResponse(BaseModel):
     onvif_username: str | None
     manufacturer: str
     retention_days: int
+    stream_quality: str
     is_active: bool
     is_online: bool
+    ptz_supported: bool
     agent_id: str | None
     last_seen_at: datetime | None
     created_at: datetime

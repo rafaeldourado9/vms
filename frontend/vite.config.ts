@@ -2,6 +2,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import path from 'path'
 
+const API_TARGET = process.env.VITE_API_URL ?? 'http://localhost:8000'
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -11,10 +13,11 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:8000',
-      '/streaming': 'http://localhost:8000',
-      '/sse': 'http://localhost:8000',
-      '/health': 'http://localhost:8000',
+      '/api':       API_TARGET,
+      '/streaming': API_TARGET,
+      '/sse':       API_TARGET,
+      '/health':    API_TARGET,
+      '/webhooks':  API_TARGET,
     },
   },
   test: {

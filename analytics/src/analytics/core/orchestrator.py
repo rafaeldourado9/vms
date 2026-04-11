@@ -1,4 +1,4 @@
-"""Orchestrator — captura frames, roteia para plugins, envia resultados."""
+"""Orchestrator — descobre câmeras, captura frames e roteia para plugins."""
 from __future__ import annotations
 
 import asyncio
@@ -17,6 +17,7 @@ from analytics.core.plugin_base import (
     ROIConfig,
 )
 from analytics.core.vms_client import VMSClient
+from analytics.core.zones import load_zones_config
 
 logger = logging.getLogger(__name__)
 
@@ -25,23 +26,25 @@ class Orchestrator:
     """
     Coordena captura de frames e roteamento para plugins.
 
-    - Descobre e carrega plugins automaticamente de analytics.plugins.*
-    - Para cada câmera, captura 1 frame/s via FrameSource
-    - Busca ROIs da câmera periodicamente via VMSClient
-    - Roteia frame + ROIs ao plugin correto (por ia_type ↔ roi_type)
-    - Envia resultados ao VMS API
+    Fluxo standalone:
+    1. Descobre câmeras via GET /api/v1/plugins/cameras
+    2. Obtém token RTSP via GET /api/v1/plugins/stream-token por câmera
+    3. Captura frames de cada câmera a 1fps (configurável)
+    4. Todos os plugins processam todos os frames
+    5. Plugins usam zonas locais (zones.yaml ou env var) — sem dependência do VMS para config
+    6. Resultados enviados via POST /api/v1/plugins/events
     """
 
     def __init__(self) -> None:
-        self._plugins: dict[str, AnalyticsPlugin] = {}
+        self._plugins: list[AnalyticsPlugin] = []
         self._vms_client = VMSClient()
         self._running = False
         self._tasks: list[asyncio.Task[None]] = []
 
     @property
-    def plugins(self) -> dict[str, AnalyticsPlugin]:
-        """Plugins carregados: {roi_type: plugin}."""
-        return dict(self._plugins)
+    def plugins(self) -> list[AnalyticsPlugin]:
+        """Plugins carregados."""
+        return list(self._plugins)
 
     async def load_plugins(self) -> None:
         """Escaneia analytics/plugins/*/plugin.py e carrega todos os plugins."""
@@ -49,7 +52,7 @@ class Orchestrator:
         plugins_pkg = importlib.import_module("analytics.plugins")
         plugins_path = Path(plugins_pkg.__path__[0])
 
-        for finder, name, ispkg in pkgutil.iter_modules([str(plugins_path)]):
+        for _finder, name, ispkg in pkgutil.iter_modules([str(plugins_path)]):
             if not ispkg:
                 continue
             try:
@@ -70,47 +73,63 @@ class Orchestrator:
                         if hasattr(plugin, "name") and plugin.name == "lpr":
                             config["model_path"] = settings.lpr_model_path
                         await plugin.initialize(config)
-                        self._plugins[plugin.roi_type] = plugin
+                        self._plugins.append(plugin)
                         logger.info(
-                            "Plugin carregado: %s v%s (roi_type=%s)",
+                            "Plugin carregado: %s v%s",
                             plugin.name,
                             plugin.version,
-                            plugin.roi_type,
                         )
             except Exception:
                 logger.exception("Erro ao carregar plugin %s", name)
 
-    async def start(self, cameras: list[dict]) -> None:
-        """
-        Inicia captura para todas as câmeras.
-
-        cameras: lista de dicts com keys camera_id, tenant_id, stream_url.
-        """
+    async def start(self) -> None:
+        """Descobre câmeras via VMS API e inicia captura."""
         await self._vms_client.start()
         self._running = True
 
+        cameras = await self._vms_client.list_cameras()
+        if not cameras:
+            logger.warning("Nenhuma câmera disponível via VMS API")
+
         settings = get_settings()
+        zones_config = load_zones_config()
+
         for cam in cameras:
+            if not cam.get("is_online", False):
+                logger.debug("Câmera %s offline — ignorando", cam["id"])
+                continue
+
+            token_data = await self._vms_client.get_stream_token(cam["id"])
+            if not token_data:
+                logger.warning("Sem token de stream para câmera %s", cam["id"])
+                continue
+
             task = asyncio.create_task(
                 self._process_camera(
-                    camera_id=cam["camera_id"],
-                    tenant_id=cam["tenant_id"],
-                    stream_url=cam["stream_url"],
+                    camera_id=cam["id"],
+                    tenant_id=cam.get("tenant_id", ""),
+                    rtsp_url=token_data["rtsp_url"],
                     fps=settings.analytics_fps,
+                    zones=zones_config.get(cam["id"], []),
                 )
             )
             self._tasks.append(task)
-        logger.info("Orchestrator iniciado para %d câmeras", len(cameras))
+
+        logger.info(
+            "Orchestrator iniciado: %d câmeras online, %d plugins ativos",
+            len(self._tasks),
+            len(self._plugins),
+        )
 
     async def stop(self) -> None:
-        """Para captura de todas as câmeras e encerra plugins."""
+        """Para captura e encerra todos os plugins."""
         self._running = False
         for task in self._tasks:
             task.cancel()
         await asyncio.gather(*self._tasks, return_exceptions=True)
         self._tasks.clear()
 
-        for plugin in self._plugins.values():
+        for plugin in self._plugins:
             await plugin.shutdown()
         self._plugins.clear()
 
@@ -121,17 +140,15 @@ class Orchestrator:
         self,
         camera_id: str,
         tenant_id: str,
-        stream_url: str,
+        rtsp_url: str,
         fps: int,
+        zones: list[ROIConfig],
     ) -> None:
         """Loop de processamento de uma câmera individual."""
-        source = FrameSource(stream_url, fps=fps)
+        source = FrameSource(rtsp_url, fps=fps)
         if not source.open():
-            logger.error("Não foi possível abrir câmera %s: %s", camera_id, stream_url)
+            logger.error("Não foi possível abrir câmera %s: %s", camera_id, rtsp_url)
             return
-
-        roi_cache: list[ROIConfig] = []
-        roi_refresh_counter = 0
 
         try:
             while self._running:
@@ -140,30 +157,16 @@ class Orchestrator:
                     await asyncio.sleep(0.05)
                     continue
 
-                # Atualiza ROIs a cada 30 iterações (~30s com 1fps)
-                roi_refresh_counter += 1
-                if roi_refresh_counter >= 30 or not roi_cache:
-                    roi_cache = await self._vms_client.get_camera_rois(camera_id)
-                    roi_refresh_counter = 0
-
-                if not roi_cache:
-                    await asyncio.sleep(1.0 / fps)
-                    continue
-
                 metadata = FrameMetadata(
                     camera_id=camera_id,
                     tenant_id=tenant_id,
                     timestamp=__import__("datetime").datetime.utcnow(),
-                    stream_url=stream_url,
+                    stream_url=rtsp_url,
                 )
 
-                for roi_type, plugin in self._plugins.items():
-                    matching_rois = [r for r in roi_cache if r.ia_type == roi_type]
-                    if not matching_rois:
-                        continue
-
+                for plugin in self._plugins:
                     try:
-                        results = await plugin.process_frame(frame, metadata, matching_rois)
+                        results = await plugin.process_frame(frame, metadata, zones)
                         for result in results:
                             await self._send_result(result)
                     except Exception:
@@ -176,14 +179,18 @@ class Orchestrator:
             source.close()
 
     async def _send_result(self, result: AnalyticsResult) -> None:
-        """Envia resultado de analytics para o VMS API."""
-        payload = {
+        """Envia resultado do plugin ao VMS via contrato público."""
+        payload: dict[str, Any] = {
             "plugin": result.plugin,
-            "camera_id": result.camera_id,
-            "tenant_id": result.tenant_id,
-            "roi_id": result.roi_id,
-            "event_type": result.event_type,
-            "payload": result.payload,
-            "occurred_at": result.occurred_at.isoformat(),
+            **result.payload,
         }
-        await self._vms_client.ingest_result(payload)
+        if result.roi_id:
+            payload["roi_id"] = result.roi_id
+
+        await self._vms_client.ingest_event(
+            camera_id=result.camera_id,
+            event_type=result.event_type,
+            payload=payload,
+            confidence=result.confidence,
+            occurred_at=result.occurred_at.isoformat(),
+        )

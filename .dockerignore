@@ -1,0 +1,37 @@
+# Node
+frontend/node_modules
+frontend/dist
+
+# Python
+**/__pycache__
+**/*.pyc
+**/*.pyo
+**/.pytest_cache
+**/.mypy_cache
+**/.ruff_cache
+**/htmlcov
+**/.coverage
+
+# Secrets / env
+.env
+.env.*
+!.env.example
+
+# Editor / OS
+.git
+.DS_Store
+**/.DS_Store
+*.log
+
+# Docker artifacts
+**/Dockerfile.dev
+
+# Analytics heavy artifacts (não entram no contexto do core)
+analytics/
+models/
+
+# Recordings
+recordings/
+
+# Backups
+backups/

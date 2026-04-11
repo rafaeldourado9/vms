@@ -22,6 +22,85 @@ from vms.core.rate_limit import limiter
 logger = logging.getLogger(__name__)
 
 
+async def _provision_mediamtx_paths() -> None:
+    """Recria todos os paths de câmeras no MediaMTX após restart."""
+    import asyncio
+    from sqlalchemy import select
+    from vms.cameras.domain import StreamProtocol
+    from vms.cameras.mediamtx import MediaMTXClient
+    from vms.cameras.models import CameraModel
+    from vms.core.database import get_session_factory
+
+    # Health check: espera MediaMTX estar pronto (max 30s)
+    mt_client = MediaMTXClient()
+    max_retries = 6
+    retry_delay = 5  # 5 segundos entre tentativas
+    
+    for attempt in range(1, max_retries + 1):
+        try:
+            # Testa conexão com MediaMTX
+            is_ready = await mt_client.health_check()
+            if is_ready:
+                logger.info("MediaMTX está pronto após %d tentativas", attempt)
+                break
+        except Exception:
+            logger.warning("MediaMTX não respondendo, tentativa %d/%d", attempt, max_retries)
+        
+        if attempt < max_retries:
+            logger.info("Aguardando %ds antes da próxima tentativa...", retry_delay)
+            await asyncio.sleep(retry_delay)
+    else:
+        logger.error("MediaMTX não ficou pronto após %d tentativas. Provisionamento cancelado.", max_retries)
+        return
+
+    try:
+        factory = get_session_factory()
+        async with factory() as session:
+            result = await session.execute(
+                select(CameraModel).where(CameraModel.is_active.is_(True))
+            )
+            cameras = result.scalars().all()
+
+        if not cameras:
+            logger.info("Nenhuma câmera ativa para provisionar")
+            return
+
+        provisioned = 0
+        failed = 0
+        
+        for cam in cameras:
+            try:
+                # Determina source URL para pull automático
+                source_url = ""
+                if cam.stream_protocol in ("rtsp_pull", "onvif") and cam.rtsp_url:
+                    source_url = cam.rtsp_url
+
+                # Para RTMP_PUSH, criar path sem source (aceitar publisher)
+                # Path usa stream_key para URL limpa: live/{stream_key}
+                if cam.stream_protocol == "rtmp_push" and cam.rtmp_stream_key:
+                    mediamtx_path = f"live/{cam.rtmp_stream_key}"
+                else:
+                    mediamtx_path = f"tenant-{cam.tenant_id}/cam-{cam.id}"
+
+                ok = await mt_client.add_path(mediamtx_path, source_url=source_url)
+                if ok:
+                    provisioned += 1
+                    logger.debug("Path provisionado: %s", mediamtx_path)
+                else:
+                    failed += 1
+                    logger.warning("Falha ao provisionar path: %s", mediamtx_path)
+            except Exception as exc:
+                failed += 1
+                logger.error("Erro ao provisionar câmera %s: %s", cam.id, exc)
+
+        logger.info(
+            "MediaMTX provisionamento concluído: %d sucesso, %d falhas (total: %d câmeras)",
+            provisioned, failed, len(cameras)
+        )
+    except Exception as exc:
+        logger.error("Falha catastrófica ao provisionar paths do MediaMTX: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Inicializa e finaliza recursos da aplicação."""
@@ -50,6 +129,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await connect_event_bus()
     except Exception as exc:
         logger.warning("Event bus indisponível no startup: %s", exc)
+
+    # MediaMTX — provisionar paths de todas as câmeras
+    await _provision_mediamtx_paths()
 
     yield
 
@@ -119,14 +201,11 @@ def _include_routers(app: FastAPI) -> None:
     from vms.notifications.router import router as notifications_router
     from vms.streaming.router import router as streaming_router
     from vms.sse.router import router as sse_router
-    from vms.analytics_config.router import router as analytics_router
-    from vms.analytics_config.router import internal_router as analytics_internal_router
+    from vms.plugins.router import router as plugins_router
+    from vms.webhooks_public.router import router as public_webhooks_router
 
     # Health — sem prefixo /api/v1
     app.include_router(health_router)
-
-    # Endpoints internos — sem prefixo /api/v1 (chamados pelo analytics_service)
-    app.include_router(analytics_internal_router)
 
     # Autenticação e gestão de usuários
     app.include_router(iam_router, prefix="/api/v1")
@@ -139,14 +218,18 @@ def _include_routers(app: FastAPI) -> None:
     # Streaming auth (chamado pelo MediaMTX, sem prefixo /api/v1)
     app.include_router(streaming_router)
 
+    # Webhooks públicos (câmeras POSTam diretamente, sem auth)
+    # Prefixo /webhooks → nginx location /webhooks/ já roteia para a API
+    app.include_router(public_webhooks_router, prefix="/webhooks")
+
     # SSE
     app.include_router(sse_router, prefix="/api/v1")
 
     # Notificações
     app.include_router(notifications_router, prefix="/api/v1")
 
-    # Analytics config — ROIs e configuração de análises
-    app.include_router(analytics_router, prefix="/api/v1")
+    # Contrato público de plugins externos
+    app.include_router(plugins_router, prefix="/api/v1")
 
 
 app = create_app()

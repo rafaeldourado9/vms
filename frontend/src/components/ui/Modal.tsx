@@ -5,10 +5,11 @@ import { clsx } from 'clsx'
 interface ModalProps {
   open: boolean
   onClose: () => void
-  title?: string
+  title?: React.ReactNode
   children: React.ReactNode
   size?: 'sm' | 'md' | 'lg' | 'xl' | 'full'
   footer?: React.ReactNode
+  disableBackdropClose?: boolean
 }
 
 const SIZES = {
@@ -19,7 +20,7 @@ const SIZES = {
   full: 'max-w-5xl',
 }
 
-export function Modal({ open, onClose, title, children, size = 'md', footer }: ModalProps) {
+export function Modal({ open, onClose, title, children, size = 'md', footer, disableBackdropClose }: ModalProps) {
   const overlayRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -35,7 +36,7 @@ export function Modal({ open, onClose, title, children, size = 'md', footer }: M
       ref={overlayRef}
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: 'rgba(0,0,0,0.7)' }}
-      onClick={(e) => { if (e.target === overlayRef.current) onClose() }}
+      onClick={(e) => { if (!disableBackdropClose && e.target === overlayRef.current) onClose() }}
     >
       <div
         className={clsx('w-full card flex flex-col max-h-[90vh] animate-slide-in', SIZES[size])}

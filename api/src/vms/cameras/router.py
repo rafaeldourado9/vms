@@ -6,7 +6,7 @@ import json
 import logging
 import time
 
-from fastapi import APIRouter, HTTPException, Query, Request, WebSocket, WebSocketDisconnect, status
+from fastapi import APIRouter, HTTPException, Query, Request, Response, WebSocket, WebSocketDisconnect, status
 
 logger = logging.getLogger(__name__)
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -30,12 +30,14 @@ from vms.cameras.schemas import (
     StreamUrlsResponse,
     UpdateCameraRequest,
 )
+from vms.cameras.ptz.router import router as ptz_router
 from vms.cameras.service import AgentService, CameraService
 from vms.core.deps import ApiKeyHeader, CurrentUser, DbSession
 from vms.iam.repository import ApiKeyRepository
 from vms.iam.service import ApiKeyService
 
 router = APIRouter()
+router.include_router(ptz_router)
 
 
 # ─── Factories ────────────────────────────────────────────────────────────────
@@ -92,7 +94,12 @@ async def create_camera(
         name=body.name,
         manufacturer=body.manufacturer,
         location=body.location,
+        address=body.address,
+        latitude=body.latitude,
+        longitude=body.longitude,
+        ia_enabled=body.ia_enabled,
         retention_days=body.retention_days,
+        stream_quality=body.stream_quality,
         stream_protocol=body.stream_protocol,
         rtsp_url=body.rtsp_url,
         agent_id=body.agent_id,
@@ -144,7 +151,12 @@ async def update_camera(
         onvif_password=body.onvif_password,
         manufacturer=body.manufacturer,
         location=body.location,
+        address=body.address,
+        latitude=body.latitude,
+        longitude=body.longitude,
+        ia_enabled=body.ia_enabled,
         retention_days=body.retention_days,
+        stream_quality=body.stream_quality,
         agent_id=body.agent_id,
         is_active=body.is_active,
     )
@@ -182,23 +194,37 @@ async def get_stream_urls(
     """Retorna URLs HLS/WebRTC assinadas para um viewer."""
     from vms.iam.service import AuthService
     from vms.iam.repository import ApiKeyRepository as IamRepo
+    from vms.core.exceptions import NotFoundError
 
-    # Gera viewer token via AuthService
-    auth_svc = AuthService(user_repo=None, api_key_repo=IamRepo(db))  # type: ignore[arg-type]
-    viewer_token = await auth_svc.issue_viewer_token(
-        tenant_id=claims.tenant_id, camera_id=camera_id
-    )
+    try:
+        # Gera viewer token via AuthService
+        auth_svc = AuthService(user_repo=None, api_key_repo=IamRepo(db))  # type: ignore[arg-type]
+        viewer_token = await auth_svc.issue_viewer_token(
+            tenant_id=claims.tenant_id, camera_id=camera_id
+        )
 
-    svc = _camera_svc(db)
-    mediamtx_host = request.headers.get("X-MediaMTX-Host", "localhost")
-    urls = await svc.get_stream_urls(camera_id, claims.tenant_id, viewer_token, mediamtx_host)
-    return StreamUrlsResponse(
-        hls_url=urls.hls_url,
-        webrtc_url=urls.webrtc_url,
-        rtsp_url=urls.rtsp_url,
-        token=urls.token,
-        expires_at=urls.expires_at,
-    )
+        svc = _camera_svc(db)
+        # Usa o host da requisição para construir URLs corretas
+        mediamtx_host = request.headers.get("X-MediaMTX-Host", request.url.hostname or "localhost")
+        urls = await svc.get_stream_urls(camera_id, claims.tenant_id, viewer_token, mediamtx_host)
+        return StreamUrlsResponse(
+            hls_url=urls.hls_url,
+            webrtc_url=urls.webrtc_url,
+            rtsp_url=urls.rtsp_url,
+            token=urls.token,
+            expires_at=urls.expires_at,
+        )
+    except NotFoundError:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Câmera não encontrada",
+        )
+    except Exception as exc:
+        logger.error("Erro ao gerar stream URLs: %s", exc)
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"Serviço de streaming temporariamente indisponível: {str(exc)}",
+        )
 
 
 @router.get(
@@ -225,8 +251,10 @@ async def get_rtmp_config(
             detail="Câmera não está configurada como RTMP push",
         )
 
-    mediamtx_host = request.headers.get("X-MediaMTX-Host", "localhost")
-    rtmp_url = f"rtmp://{mediamtx_host}:1935/{camera.mediamtx_path}"
+    from vms.core.config import get_settings
+    settings = get_settings()
+    # URL pública no formato padrão do mercado: {base}/live/{stream_key}.stream
+    rtmp_url = f"{settings.rtmp_public_url}/live/{camera.rtmp_stream_key}.stream"
     return RtmpConfigResponse(rtmp_url=rtmp_url, stream_key=camera.rtmp_stream_key)
 
 
@@ -246,6 +274,46 @@ async def get_snapshot(
     camera = await svc.get_camera(camera_id, claims.tenant_id)
     url = await get_snapshot_url(camera)
     return {"snapshot_url": url}
+
+
+@router.get(
+    "/cameras/{camera_id}/thumbnail",
+    summary="Thumbnail da câmera (imagem JPEG)",
+    tags=["cameras"],
+    include_in_schema=False,
+)
+async def get_thumbnail(
+    camera_id: str,
+    db: DbSession,
+    token: str | None = Query(default=None),
+) -> Response:
+    """
+    Captura um frame do stream e retorna como imagem JPEG.
+
+    Aceita token via query param (?token=...) para uso em <img src>.
+    Usa ffmpeg para extrair frame do HLS/RTSP. Resultado cacheado por 30s.
+    """
+    from fastapi.responses import Response as FastResponse
+    from vms.cameras.thumbnail import capture_thumbnail
+    from vms.core.security import decode_token
+    from jose import JWTError
+
+    if not token:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token obrigatório")
+    try:
+        payload = decode_token(token)
+        tenant_id: str = payload["tenant_id"]
+    except (JWTError, KeyError):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Token inválido")
+
+    svc = _camera_svc(db)
+    camera = await svc.get_camera(camera_id, tenant_id)
+    jpeg_bytes = await capture_thumbnail(camera)
+    if not jpeg_bytes:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Thumbnail indisponível")
+    return FastResponse(content=jpeg_bytes, media_type="image/jpeg", headers={
+        "Cache-Control": "public, max-age=30",
+    })
 
 
 @router.post(

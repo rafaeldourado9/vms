@@ -4,7 +4,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, func
+from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from vms.core.database import Base
@@ -64,6 +64,10 @@ class CameraModel(Base):
     )
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     location: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    address: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    latitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    longitude: Mapped[float | None] = mapped_column(Float, nullable=True)
+    ia_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     stream_protocol: Mapped[str] = mapped_column(
         String(50), nullable=False, default="rtsp_pull"
     )
@@ -74,8 +78,10 @@ class CameraModel(Base):
     onvif_password: Mapped[str | None] = mapped_column(String(500), nullable=True)
     manufacturer: Mapped[str] = mapped_column(String(50), nullable=False, default="generic")
     retention_days: Mapped[int] = mapped_column(Integer, nullable=False, default=7)
+    stream_quality: Mapped[str] = mapped_column(String(20), nullable=False, default="high")
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     is_online: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    ptz_supported: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     last_seen_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )

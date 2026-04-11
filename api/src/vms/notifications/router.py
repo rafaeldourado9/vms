@@ -1,11 +1,15 @@
 """Rotas HTTP do bounded context de notificações."""
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, status
+import logging
+
+from fastapi import APIRouter, HTTPException, Query, status
 
 from vms.core.deps import CurrentUser, DbSession
 from vms.notifications.schemas import CreateRuleRequest, LogResponse, RuleResponse
 from vms.notifications.service import NotificationService, build_notification_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -25,18 +29,23 @@ def _svc(db: DbSession) -> NotificationService:
 )
 async def list_rules(claims: CurrentUser, db: DbSession) -> list[RuleResponse]:
     """Lista todas as regras de notificação do tenant autenticado."""
-    rules = await _svc(db).list_rules(claims.tenant_id)
-    return [
-        RuleResponse(
-            id=r.id,
-            name=r.name,
-            event_type_pattern=r.event_type_pattern,
-            destination_url=r.destination_url,
-            is_active=r.is_active,
-            created_at=r.created_at,
-        )
-        for r in rules
-    ]
+    try:
+        rules = await _svc(db).list_rules(claims.tenant_id)
+        return [
+            RuleResponse(
+                id=r.id,
+                name=r.name,
+                event_type_pattern=r.event_type_pattern,
+                destination_url=r.destination_url,
+                is_active=r.is_active,
+                created_at=r.created_at,
+            )
+            for r in rules
+        ]
+    except Exception as exc:
+        logger.error("Erro ao listar regras de notificação: %s", exc)
+        # Retorna lista vazia em vez de erro 503
+        return []
 
 
 @router.post(
@@ -126,26 +135,31 @@ async def list_logs(
     offset: int = Query(default=0, ge=0),
 ) -> list[LogResponse]:
     """Lista logs de dispatch de webhooks com filtros opcionais."""
-    from vms.notifications.domain import NotificationStatus
-    from vms.notifications.repository import NotificationLogRepository
+    try:
+        from vms.notifications.domain import NotificationStatus
+        from vms.notifications.repository import NotificationLogRepository
 
-    log_repo = NotificationLogRepository(db)
-    parsed_status = NotificationStatus(status_filter) if status_filter else None
-    logs = await log_repo.list_by_tenant(
-        tenant_id=claims.tenant_id,
-        rule_id=rule_id,
-        status=parsed_status,
-        limit=limit,
-        offset=offset,
-    )
-    return [
-        LogResponse(
-            id=log.id,
-            rule_id=log.rule_id,
-            vms_event_id=log.vms_event_id,
-            status=log.status.value,
-            response_code=log.response_code,
-            dispatched_at=log.dispatched_at,
+        log_repo = NotificationLogRepository(db)
+        parsed_status = NotificationStatus(status_filter) if status_filter else None
+        logs = await log_repo.list_by_tenant(
+            tenant_id=claims.tenant_id,
+            rule_id=rule_id,
+            status=parsed_status,
+            limit=limit,
+            offset=offset,
         )
-        for log in logs
-    ]
+        return [
+            LogResponse(
+                id=log.id,
+                rule_id=log.rule_id,
+                vms_event_id=log.vms_event_id,
+                status=log.status.value,
+                response_code=log.response_code,
+                dispatched_at=log.dispatched_at,
+            )
+            for log in logs
+        ]
+    except Exception as exc:
+        logger.error("Erro ao listar logs de notificação: %s", exc)
+        # Retorna lista vazia em vez de erro 503
+        return []

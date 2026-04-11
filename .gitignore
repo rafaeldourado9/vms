@@ -17,7 +17,7 @@ env/
 .vscode/
 *.swp
 *.swo
-
+legado/
 # OS
 .DS_Store
 Thumbs.db
@@ -31,3 +31,5 @@ htmlcov/
 # Environment
 .env
 *.env.local
+legado/
+legado

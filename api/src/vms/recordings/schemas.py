@@ -100,6 +100,6 @@ class ClipListResponse(BaseModel):
 class TimelineHourResponse(BaseModel):
     """Agrupamento de segmentos por hora para UI de playback."""
 
-    hour: datetime
+    hour: int = Field(description="Hora do dia (0-23)")
     segments: list[RecordingSegmentResponse]
-    coverage_pct: float
+    coverage_pct: float = Field(description="Percentual de cobertura (0.0-1.0)")

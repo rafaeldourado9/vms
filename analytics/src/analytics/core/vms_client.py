@@ -1,4 +1,4 @@
-"""Cliente HTTP para comunicação com a VMS API."""
+"""Cliente HTTP para comunicação com a VMS API via contrato público de plugins."""
 from __future__ import annotations
 
 import logging
@@ -7,29 +7,33 @@ from typing import Any
 import httpx
 
 from analytics.core.config import get_settings
-from analytics.core.plugin_base import ROIConfig
 
 logger = logging.getLogger(__name__)
 
 
 class VMSClient:
     """
-    Cliente assíncrono para a VMS API.
+    Cliente assíncrono para o contrato público de plugins do VMS.
 
-    Usa analytics API key para autenticação nos endpoints internos.
+    Autentica com API key de plugin via header Authorization: ApiKey <key>.
+    Todos os endpoints usados são públicos — nenhum endpoint interno.
     """
 
     def __init__(self) -> None:
         settings = get_settings()
         self._base_url = settings.vms_api_url
-        self._api_key = settings.vms_analytics_api_key
+        self._api_key = settings.vms_api_key
+        self._mediamtx_host = settings.mediamtx_host
         self._client: httpx.AsyncClient | None = None
 
     async def start(self) -> None:
         """Inicializa o cliente HTTP."""
         self._client = httpx.AsyncClient(
             base_url=self._base_url,
-            headers={"Authorization": f"ApiKey {self._api_key}"},
+            headers={
+                "Authorization": f"ApiKey {self._api_key}",
+                "X-MediaMTX-Host": self._mediamtx_host,
+            },
             timeout=httpx.Timeout(10.0),
         )
 
@@ -39,38 +43,73 @@ class VMSClient:
             await self._client.aclose()
             self._client = None
 
-    async def get_camera_rois(self, camera_id: str) -> list[ROIConfig]:
-        """Busca ROIs ativas de uma câmera via endpoint interno."""
+    async def list_cameras(self) -> list[dict[str, Any]]:
+        """
+        Busca câmeras ativas do tenant via GET /api/v1/plugins/cameras.
+
+        Retorna lista de dicts com id, name, stream_protocol, is_online, mediamtx_path.
+        """
         if not self._client:
             return []
 
         try:
-            resp = await self._client.get(f"/internal/cameras/{camera_id}/rois")
+            resp = await self._client.get("/api/v1/plugins/cameras")
             resp.raise_for_status()
-            data: list[dict[str, Any]] = resp.json()
-            return [
-                ROIConfig(
-                    id=item["id"],
-                    name=item["name"],
-                    ia_type=item["ia_type"],
-                    polygon_points=item["polygon_points"],
-                    config=item.get("config", {}),
-                )
-                for item in data
-            ]
+            return resp.json()  # type: ignore[no-any-return]
         except httpx.HTTPError:
-            logger.exception("Erro ao buscar ROIs para câmera %s", camera_id)
+            logger.exception("Erro ao listar câmeras do VMS")
             return []
 
-    async def ingest_result(self, payload: dict) -> bool:
-        """Envia resultado de analytics para o VMS API via POST /internal/analytics/ingest."""
+    async def get_stream_token(self, camera_id: str) -> dict[str, Any] | None:
+        """
+        Obtém token de acesso RTSP para uma câmera via GET /api/v1/plugins/stream-token.
+
+        Retorna dict com rtsp_url, token e expires_at, ou None em caso de erro.
+        """
+        if not self._client:
+            return None
+
+        try:
+            resp = await self._client.get(
+                "/api/v1/plugins/stream-token",
+                params={"camera_id": camera_id},
+            )
+            resp.raise_for_status()
+            return resp.json()  # type: ignore[no-any-return]
+        except httpx.HTTPError:
+            logger.exception("Erro ao obter stream token para câmera %s", camera_id)
+            return None
+
+    async def ingest_event(
+        self,
+        camera_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+        confidence: float | None = None,
+        occurred_at: str | None = None,
+    ) -> bool:
+        """
+        Envia evento detectado pelo plugin via POST /api/v1/plugins/events.
+
+        Retorna True se aceito com sucesso.
+        """
         if not self._client:
             return False
 
+        body: dict[str, Any] = {
+            "camera_id": camera_id,
+            "event_type": event_type,
+            "payload": payload,
+        }
+        if confidence is not None:
+            body["confidence"] = confidence
+        if occurred_at is not None:
+            body["occurred_at"] = occurred_at
+
         try:
-            resp = await self._client.post("/internal/analytics/ingest", json=payload)
+            resp = await self._client.post("/api/v1/plugins/events", json=body)
             resp.raise_for_status()
             return True
         except httpx.HTTPError:
-            logger.exception("Erro ao enviar resultado de analytics")
+            logger.exception("Erro ao enviar evento de plugin para o VMS")
             return False

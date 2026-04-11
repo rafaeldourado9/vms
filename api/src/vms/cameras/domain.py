@@ -20,8 +20,16 @@ class CameraManufacturer(StrEnum):
 
     HIKVISION = "hikvision"
     INTELBRAS = "intelbras"
-    DAHUA = "dahua"
     GENERIC = "generic"
+
+
+class StreamQuality(StrEnum):
+    """Qualidade de stream/gravação da câmera."""
+
+    LOW = "low"        # 480p — menor consumo de banda
+    MEDIUM = "medium"  # 720p — equilibrio
+    HIGH = "high"      # 1080p — alta fidelidade
+    SOURCE = "source"  # resolução original da câmera
 
 
 class AgentStatus(StrEnum):
@@ -81,16 +89,29 @@ class Camera:
     onvif_username: str | None = None     # onvif
     onvif_password: str | None = None     # onvif (armazenado encrypted at rest)
     location: str | None = None
+    address: str | None = None            # endereço humano (ex: rua, cidade)
+    latitude: float | None = None         # usado no mapa tático
+    longitude: float | None = None        # usado no mapa tático
+    ia_enabled: bool = False               # flag para analytics (plugins) ativos na câmera
     agent_id: str | None = None           # null para rtmp_push
     retention_days: int = 7
+    stream_quality: StreamQuality = StreamQuality.HIGH
     is_active: bool = True
     is_online: bool = False
+    ptz_supported: bool = False
     last_seen_at: datetime | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
 
     @property
     def mediamtx_path(self) -> str:
-        """Retorna o path do stream no MediaMTX."""
+        """
+        Retorna o path do stream no MediaMTX.
+
+        RTMP push usa path baseado no stream_key para URL limpa ao integrador.
+        RTSP/ONVIF usa path baseado em tenant+camera para isolamento.
+        """
+        if self.stream_protocol == StreamProtocol.RTMP_PUSH and self.rtmp_stream_key:
+            return f"live/{self.rtmp_stream_key}"
         return f"tenant-{self.tenant_id}/cam-{self.id}"
 
     def mark_online(self) -> None:

@@ -1,10 +1,9 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Settings, Map, Wifi, Edit2, Save, X, Film, ShieldAlert, Camera as CameraIcon } from 'lucide-react'
+import { ArrowLeft, Settings, Wifi, Edit2, Save, X, Film, ShieldAlert, Camera as CameraIcon, Copy, Check } from 'lucide-react'
 import { clsx } from 'clsx'
 import { format } from 'date-fns'
 import { camerasService } from '@/services/cameras'
-import { analyticsService } from '@/services/analytics'
 import { eventsService } from '@/services/events'
 import { recordingsService } from '@/services/recordings'
 import { VideoPlayer } from '@/components/camera/VideoPlayer'
@@ -12,37 +11,113 @@ import { PageSpinner } from '@/components/ui/Spinner'
 import { Badge } from '@/components/ui/Badge'
 import { Modal } from '@/components/ui/Modal'
 import { usePermission } from '@/hooks/usePermission'
+import type { Camera, VmsEvent, Clip } from '@/types'
 import toast from 'react-hot-toast'
-import type { Camera, ROI, VmsEvent, Clip } from '@/types'
 
-type Tab = 'live' | 'info' | 'rois' | 'events' | 'clips'
+type Tab = 'live' | 'info' | 'events' | 'clips'
+
+// ─── Webhook URLs section ─────────────────────────────────────────────────────
+
+function webhookUrlFor(manufacturer: string): string {
+  const base = window.location.origin
+  if (manufacturer === 'hikvision') return `${base}/webhooks/hik_pro_connect`
+  if (manufacturer === 'intelbras') return `${base}/webhooks/intelbras_events`
+  return `${base}/webhooks/camera_events`
+}
+
+function WebhookSection({ camera }: { camera: Camera }) {
+  const [copied, setCopied] = useState<string | null>(null)
+
+  function copy(text: string, key: string) {
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(key)
+      setTimeout(() => setCopied(null), 2000)
+    })
+  }
+
+  const webhookUrl = webhookUrlFor(camera.manufacturer)
+  const isGeneric = camera.manufacturer !== 'hikvision' && camera.manufacturer !== 'intelbras'
+
+  return (
+    <div className="mt-6 pt-6 border-t border-border space-y-4">
+      <div>
+        <p className="text-sm font-semibold text-t1">Configuração de Eventos</p>
+        <p className="text-xs text-t3 mt-0.5">
+          Configure a câmera para enviar eventos para este endpoint. Não requer autenticação.
+        </p>
+      </div>
+
+      {/* Webhook URL */}
+      <div>
+        <label className="label">URL do Webhook</label>
+        <div className="flex items-center gap-2 mt-1">
+          <code className="flex-1 text-xs font-mono bg-elevated rounded-lg px-3 py-2 text-t1 break-all">
+            {webhookUrl}
+          </code>
+          <button
+            className="btn btn-ghost w-8 h-8 p-0 shrink-0"
+            onClick={() => copy(webhookUrl, 'url')}
+            title="Copiar URL"
+          >
+            {copied === 'url' ? <Check size={14} style={{ color: 'var(--success)' }} /> : <Copy size={14} />}
+          </button>
+        </div>
+      </div>
+
+      {/* Camera ID */}
+      <div>
+        <label className="label">ID da Câmera <span className="text-t3/60">(incluir no payload)</span></label>
+        <div className="flex items-center gap-2 mt-1">
+          <code className="flex-1 text-xs font-mono bg-elevated rounded-lg px-3 py-2 text-t1">
+            {camera.id}
+          </code>
+          <button
+            className="btn btn-ghost w-8 h-8 p-0 shrink-0"
+            onClick={() => copy(camera.id, 'id')}
+            title="Copiar ID"
+          >
+            {copied === 'id' ? <Check size={14} style={{ color: 'var(--success)' }} /> : <Copy size={14} />}
+          </button>
+        </div>
+      </div>
+
+      {/* Payload example */}
+      <div>
+        <label className="label">Exemplo de payload</label>
+        <pre
+          className="text-[11px] font-mono rounded-lg p-3 mt-1 overflow-x-auto text-t2 leading-relaxed"
+          style={{ background: 'var(--elevated)' }}
+        >
+          {isGeneric
+            ? `POST ${webhookUrl}\nContent-Type: application/json\n\n{\n  "camera_id": "${camera.id}",\n  "eventType": "motion",\n  "timestamp": "2026-04-10T12:00:00Z"\n}`
+            : camera.manufacturer === 'hikvision'
+              ? `POST ${webhookUrl}\nContent-Type: application/json\n\n{\n  "camera_id": "${camera.id}",\n  "ANPR": {\n    "licensePlate": "ABC1D23",\n    "confidence": 92\n  }\n}`
+              : `POST ${webhookUrl}\nContent-Type: application/json\n\n{\n  "camera_id": "${camera.id}",\n  "plate": "ABC1D23",\n  "confidence": 0.92\n}`
+          }
+        </pre>
+      </div>
+    </div>
+  )
+}
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
   { id: 'live',   label: 'Ao Vivo',     icon: Wifi },
   { id: 'info',   label: 'Informações', icon: Settings },
-  { id: 'rois',   label: 'ROIs',        icon: Map },
   { id: 'events', label: 'Eventos',     icon: ShieldAlert },
   { id: 'clips',  label: 'Clips',       icon: Film },
 ]
-
-const EVENT_LABELS: Record<string, string> = {
-  alpr: 'ALPR', intrusion: 'Intrusão', people_count: 'Pessoas',
-  vehicle_count: 'Veículos', lpr_parking: 'Estacionamento',
-  weapon_detection: 'Arma', face_recognition: 'Facial', vehicle_dwell: 'Dwell',
-}
 
 export function CameraDetailPage() {
   const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
   const { isAdmin } = usePermission()
 
-  const [tab, setTab]           = useState<Tab>('live')
-  const [camera, setCamera]     = useState<Camera | null>(null)
-  const [streamUrl, setStream]  = useState('')
-  const [rois, setRois]         = useState<ROI[]>([])
-  const [events, setEvents]     = useState<VmsEvent[]>([])
-  const [clips, setClips]       = useState<Clip[]>([])
-  const [loading, setLoading]   = useState(true)
+  const [tab, setTab]             = useState<Tab>('live')
+  const [camera, setCamera]       = useState<Camera | null>(null)
+  const [streamUrl, setStream]    = useState('')
+  const [events, setEvents]       = useState<VmsEvent[]>([])
+  const [clips, setClips]         = useState<Clip[]>([])
+  const [loading, setLoading]     = useState(true)
   const [editing, setEditing]     = useState(false)
   const [editForm, setEditForm]   = useState<Partial<Camera>>({})
   const [snapshotOpen, setSnapshotOpen] = useState(false)
@@ -63,9 +138,6 @@ export function CameraDetailPage() {
 
   useEffect(() => {
     if (!id || tab === 'live' || tab === 'info') return
-    if (tab === 'rois') {
-      analyticsService.listROIs(id).then(setRois).catch(() => setRois([]))
-    }
     if (tab === 'events') {
       eventsService.list({ camera_id: id, page_size: 20 }).then((r) => setEvents(r.items ?? []))
     }
@@ -78,8 +150,8 @@ export function CameraDetailPage() {
     if (!id || !camera) return
     try {
       const updated = await camerasService.update(id, {
-        name:          editForm.name,
-        location:      editForm.location ?? undefined,
+        name:           editForm.name,
+        location:       editForm.location ?? undefined,
         retention_days: editForm.retention_days,
       })
       setCamera(updated)
@@ -93,21 +165,19 @@ export function CameraDetailPage() {
     setSnapshotLoading(true)
     setSnapshotOpen(true)
     try {
-      const { snapshot_url } = await camerasService.snapshot(id)
-      setSnapshotUrl(snapshot_url)
+      const url = await camerasService.snapshot(id)
+      if (url) {
+        setSnapshotUrl(url)
+      } else {
+        toast.error('Snapshot indisponível')
+        setSnapshotOpen(false)
+      }
     } catch {
       toast.error('Erro ao capturar snapshot')
       setSnapshotOpen(false)
     } finally {
       setSnapshotLoading(false)
     }
-  }
-
-  const toggleROI = async (roi: ROI) => {
-    try {
-      const updated = await analyticsService.updateROI(roi.id, { is_active: !roi.is_active })
-      setRois((prev) => prev.map((r) => r.id === roi.id ? updated : r))
-    } catch { toast.error('Erro ao atualizar ROI') }
   }
 
   if (loading) return <PageSpinner />
@@ -155,8 +225,19 @@ export function CameraDetailPage() {
       {tab === 'live' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
           <div className="lg:col-span-2">
-            <VideoPlayer src={streamUrl} name={camera.name} className="aspect-video w-full" />
+            <VideoPlayer
+              src={streamUrl || undefined}
+              name={camera.name}
+              offline={!camera.is_online}
+              className="aspect-video w-full"
+              autoPlay
+            />
+            <p className="text-[10px] text-t3/60 text-center mt-1">
+              Para ver gravações, abra a página <strong className="text-t2">Gravações</strong> na sidebar.
+            </p>
           </div>
+
+          {/* Side panel */}
           <div className="space-y-3">
             <div className="card p-4 space-y-3">
               <p className="text-xs font-semibold text-t2 uppercase tracking-wide">Status</p>
@@ -165,7 +246,6 @@ export function CameraDetailPage() {
                   { label: 'Protocolo',  value: camera.stream_protocol.replace('_', ' ').toUpperCase() },
                   { label: 'Fabricante', value: camera.manufacturer },
                   { label: 'Retenção',   value: `${camera.retention_days} dias` },
-                  { label: 'Agent',      value: camera.agent_id ? camera.agent_id.slice(0, 8) + '…' : '—' },
                   { label: 'Última vez', value: camera.last_seen_at ? format(new Date(camera.last_seen_at), 'dd/MM HH:mm') : '—' },
                 ].map(({ label, value }) => (
                   <div key={label} className="flex justify-between">
@@ -175,17 +255,8 @@ export function CameraDetailPage() {
                 ))}
               </div>
             </div>
-            <button
-              className="btn btn-ghost w-full gap-2"
-              onClick={openSnapshot}
-            >
+            <button className="btn btn-ghost w-full gap-2" onClick={openSnapshot}>
               <CameraIcon size={15} />Snapshot
-            </button>
-            <button
-              className="btn btn-primary w-full gap-2"
-              onClick={() => navigate(`/cameras/${id}/roi`)}
-            >
-              <Map size={15} />Editor de ROI
             </button>
           </div>
         </div>
@@ -256,45 +327,9 @@ export function CameraDetailPage() {
               </div>
             ))}
           </div>
-        </div>
-      )}
 
-      {/* ROIs */}
-      {tab === 'rois' && (
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <p className="text-xs text-t3">{rois.length} ROIs configuradas</p>
-            <button className="btn btn-primary gap-2" onClick={() => navigate(`/cameras/${id}/roi`)}>
-              <Map size={15} />Abrir Editor de ROI
-            </button>
-          </div>
-          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-            {rois.map((roi) => (
-              <div key={roi.id} className="card p-4 flex items-start gap-3">
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-t1">{roi.name}</p>
-                  <p className="text-xs text-t3">{roi.ia_type}</p>
-                  <p className="text-xs text-t3">{roi.polygon_points?.length ?? 0} pontos</p>
-                </div>
-                <button
-                  className={clsx('relative w-10 h-6 rounded-full transition-colors shrink-0')}
-                  style={roi.is_active ? { background: 'var(--accent)' } : { background: 'var(--elevated)' }}
-                  onClick={() => toggleROI(roi)}
-                >
-                  <div className={clsx(
-                    'absolute top-1 w-4 h-4 rounded-full bg-white transition-transform',
-                    roi.is_active ? 'translate-x-5' : 'translate-x-1',
-                  )} />
-                </button>
-              </div>
-            ))}
-            {rois.length === 0 && (
-              <div className="col-span-full card p-16 text-center">
-                <Map size={32} className="text-t3 mx-auto mb-3" />
-                <p className="text-t3 text-sm">Nenhuma ROI configurada</p>
-              </div>
-            )}
-          </div>
+          {/* Webhook URLs */}
+          <WebhookSection camera={camera} />
         </div>
       )}
 
@@ -313,7 +348,7 @@ export function CameraDetailPage() {
               {events.map((e) => (
                 <tr key={e.id} className="border-b hover:bg-elevated transition" style={{ borderColor: 'var(--border)' }}>
                   <td className="px-4 py-3">
-                    <Badge variant="info">{EVENT_LABELS[e.event_type] ?? e.event_type}</Badge>
+                    <Badge variant="info">{e.event_type}</Badge>
                   </td>
                   <td className="px-4 py-3 text-t2 text-xs font-mono">{e.plate ?? '—'}</td>
                   <td className="px-4 py-3 text-t3 text-xs">
@@ -340,7 +375,7 @@ export function CameraDetailPage() {
                 <Film size={24} className="text-t3" />
               </div>
               <div className="p-3">
-                <p className="text-sm font-medium text-t1 truncate">{clip.name}</p>
+                <p className="text-sm font-medium text-t1 truncate">{clip.name || clip.id.slice(0, 8)}</p>
                 <p className="text-xs text-t3">{format(new Date(clip.created_at), 'dd/MM/yyyy HH:mm')}</p>
                 <Badge
                   variant={clip.status === 'ready' ? 'success' : clip.status === 'error' ? 'danger' : 'warning'}

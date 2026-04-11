@@ -4,17 +4,33 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
+from jose import JWTError
 
-from vms.core.deps import CurrentUser
+from vms.core.security import decode_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _SSE_MAX_CONNECTIONS = 30
 _sse_active = 0
+
+
+def _get_claims_from_token(token: str) -> dict:
+    """Valida JWT e retorna claims."""
+    try:
+        payload = decode_token(token)
+        if payload.get("type") != "access":
+            raise JWTError("Tipo de token inválido")
+        return payload
+    except (JWTError, KeyError) as exc:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token inválido ou expirado",
+        ) from exc
 
 
 @router.get(
@@ -24,11 +40,12 @@ _sse_active = 0
 )
 async def sse_stream(
     request: Request,
-    claims: CurrentUser,
+    token: Annotated[str | None, Query()] = None,
 ) -> StreamingResponse:
     """
     Stream SSE filtrado por tenant do usuário autenticado.
 
+    Autenticação via query string: `?token=<jwt>`.
     Escuta canal Redis `sse:{tenant_id}` e envia eventos ao cliente.
     """
     global _sse_active
@@ -38,7 +55,14 @@ async def sse_stream(
             detail="Limite de conexões SSE atingido. Tente novamente mais tarde.",
         )
 
-    tenant_id = claims.tenant_id
+    if not token:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token obrigatório para SSE",
+        )
+
+    claims = _get_claims_from_token(token)
+    tenant_id = claims["tenant_id"]
 
     async def event_generator():
         """Gera eventos SSE via Redis pub/sub."""

@@ -11,7 +11,6 @@ const TITLES: Record<string, string> = {
   '/recordings':   'Gravações',
   '/analytics':    'Analytics',
   '/events':       'Eventos',
-  '/agents':       'Agents',
   '/notifications': 'Notificações',
   '/users':        'Usuários',
   '/settings':     'Configurações',

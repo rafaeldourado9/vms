@@ -1,17 +1,17 @@
 services:
   # ─── Infraestrutura ──────────────────────────────────────────────────────
   postgres:
-    image: postgres:16-alpine
+    build:
+      context: ./infra/postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: vms
-      POSTGRES_USER: vms
+      POSTGRES_DB: ${POSTGRES_DB:-vms}
+      POSTGRES_USER: ${POSTGRES_USER:-vms}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-vmsdev}
     volumes:
       - pgdata:/var/lib/postgresql/data
-      - ./infra/postgres/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U vms -d vms"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vms} -d ${POSTGRES_DB:-vms}"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -45,7 +45,8 @@ services:
 
   # ─── Streaming ────────────────────────────────────────────────────────────
   mediamtx:
-    build: ./infra/mediamtx
+    build:
+      context: ./infra/mediamtx
     restart: unless-stopped
     ports:
       - "8554:8554"   # RTSP
@@ -68,13 +69,12 @@ services:
       target: production
     restart: unless-stopped
     environment:
-      - DATABASE_URL=postgresql+asyncpg://vms:${POSTGRES_PASSWORD:-vmsdev}@postgres:5432/vms
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-vms}:${POSTGRES_PASSWORD:-vmsdev}@postgres:5432/${POSTGRES_DB:-vms}
       - REDIS_URL=redis://redis:6379/0
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-vms}:${RABBITMQ_PASSWORD:-vmsdev}@rabbitmq:5672/
       - SECRET_KEY=${SECRET_KEY:-dev-secret-change-in-prod}
       - MEDIAMTX_API_URL=http://mediamtx:9997
       - MEDIAMTX_RTMP_URL=rtmp://mediamtx:1935
-      - ANALYTICS_API_KEY=${ANALYTICS_API_KEY:-dev-analytics-key}
       - RECORDINGS_PATH=/recordings
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ENVIRONMENT=${ENVIRONMENT:-production}
@@ -102,7 +102,7 @@ services:
     restart: unless-stopped
     command: python -m arq vms.worker.WorkerSettings
     environment:
-      - DATABASE_URL=postgresql+asyncpg://vms:${POSTGRES_PASSWORD:-vmsdev}@postgres:5432/vms
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-vms}:${POSTGRES_PASSWORD:-vmsdev}@postgres:5432/${POSTGRES_DB:-vms}
       - REDIS_URL=redis://redis:6379/0
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-vms}:${RABBITMQ_PASSWORD:-vmsdev}@rabbitmq:5672/
       - SECRET_KEY=${SECRET_KEY:-dev-secret-change-in-prod}
@@ -117,7 +117,7 @@ services:
         condition: service_healthy
     networks: [vms]
 
-  # ─── Analytics Service ────────────────────────────────────────────────────
+  # ─── Analytics Service (plugin standalone — opcional) ─────────────────────
   analytics:
     build:
       context: ./analytics
@@ -125,9 +125,8 @@ services:
     restart: unless-stopped
     environment:
       - VMS_API_URL=http://api:8000
-      - VMS_ANALYTICS_API_KEY=${ANALYTICS_API_KEY:-dev-analytics-key}
-      - REDIS_URL=redis://redis:6379/1
-      - MEDIAMTX_API_URL=http://mediamtx:9997
+      - VMS_API_KEY=${VMS_API_KEY:-dev-analytics-key}
+      - MEDIAMTX_HOST=mediamtx
       - ANALYTICS_FPS=${ANALYTICS_FPS:-1}
       - ANALYTICS_WORKERS=${ANALYTICS_WORKERS:-4}
       - YOLO_IMGSZ=${YOLO_IMGSZ:-640}
@@ -135,37 +134,64 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - recordings:/recordings
-      - ./models:/models:ro   # modelos YOLO pré-treinados
+      - ./models:/models:ro          # modelos YOLO pré-treinados
+      - ./analytics/zones.yaml:/app/zones.yaml:ro  # zonas locais (opcional)
     depends_on:
       api:
         condition: service_healthy
+    profiles: [analytics]            # `docker compose --profile analytics up`
     networks: [vms]
 
   # ─── Frontend ─────────────────────────────────────────────────────────────
   frontend:
-    build: ./frontend
+    build:
+      context: ./frontend
     restart: unless-stopped
     networks: [vms]
 
-  # ─── Nginx ────────────────────────────────────────────────────────────────
+  # ─── Nginx (reverse proxy) ────────────────────────────────────────────────
   nginx:
-    image: nginx:1.25-alpine
+    build:
+      context: ./infra/nginx
     restart: unless-stopped
     ports:
       - "80:80"
       - "443:443"
+    environment:
+      - DOMAIN=${DOMAIN:-localhost}
     volumes:
-      - ./infra/nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ./infra/nginx/certs:/etc/nginx/certs:ro
+      - ./infra/nginx/certbot:/var/www/certbot:ro
       - recordings:/recordings:ro
     depends_on:
       - api
       - frontend
     networks: [vms]
 
+  # ─── Backup (job pontual — não fica rodando) ──────────────────────────────
+  backup:
+    build:
+      context: ./infra/scripts
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-vms}
+      - POSTGRES_USER=${POSTGRES_USER:-vms}
+      - PGPASSWORD=${POSTGRES_PASSWORD:-vmsdev}
+      - BACKUP_DIR=/backups
+      - RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-7}
+    volumes:
+      - backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
+    profiles: [backup]               # `docker compose --profile backup run --rm backup`
+    networks: [vms]
+
 volumes:
   pgdata:
   recordings:
+  backups:
 
 networks:
   vms:

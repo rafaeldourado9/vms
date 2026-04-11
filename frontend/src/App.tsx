@@ -9,12 +9,10 @@ import { LoginPage }           from '@/pages/LoginPage'
 import { DashboardPage }       from '@/pages/DashboardPage'
 import { CamerasPage }         from '@/pages/CamerasPage'
 import { CameraDetailPage }    from '@/pages/CameraDetailPage'
-import { ROIEditorPage }       from '@/pages/ROIEditorPage'
 import { MosaicPage }          from '@/pages/MosaicPage'
+import { MapPage }             from '@/pages/MapPage'
 import { RecordingsPage }      from '@/pages/RecordingsPage'
 import { EventsPage }          from '@/pages/EventsPage'
-import { AnalyticsPage }       from '@/pages/AnalyticsPage'
-import { AgentsPage }          from '@/pages/AgentsPage'
 import { NotificationsPage }   from '@/pages/NotificationsPage'
 import { UsersPage }           from '@/pages/UsersPage'
 import { SettingsPage }        from '@/pages/SettingsPage'
@@ -39,12 +37,10 @@ function AuthenticatedApp() {
         <Route path="/dashboard"     element={<DashboardPage />} />
         <Route path="/cameras"       element={<CamerasPage />} />
         <Route path="/cameras/:id"   element={<CameraDetailPage />} />
-        <Route path="/cameras/:id/roi" element={<ROIEditorPage />} />
         <Route path="/mosaic"        element={<MosaicPage />} />
+        <Route path="/map"           element={<MapPage />} />
         <Route path="/recordings"    element={<RecordingsPage />} />
         <Route path="/events"        element={<EventsPage />} />
-        <Route path="/analytics"     element={<AnalyticsPage />} />
-        <Route path="/agents"        element={<AgentsPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/users"         element={<UsersPage />} />
         <Route path="/settings"      element={<SettingsPage />} />

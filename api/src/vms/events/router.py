@@ -31,6 +31,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 _MEDIAMTX_PATH_RE = re.compile(r"tenant-(?P<tenant_id>[^/]+)/cam-(?P<camera_id>.+)")
+_LIVE_PATH_RE     = re.compile(r"live/(?P<stream_key>[^/]+?)(?:\.stream)?$")
 
 
 async def _get_redis(request: Request) -> Redis:
@@ -118,9 +119,11 @@ async def webhook_alpr_vendor(
     summary="Webhook MediaMTX — stream pronto",
     tags=["webhooks"],
 )
-async def mediamtx_on_ready(body: MediaMTXOnReadyPayload, request: Request) -> dict:
+async def mediamtx_on_ready(
+    body: MediaMTXOnReadyPayload, request: Request, db: DbSession
+) -> dict:
     """Marca câmera como online quando stream está disponível."""
-    ids = _parse_mediamtx_path(body.path)
+    ids = _parse_mediamtx_path(body.path) or await _resolve_live_path(body.path, db)
     if not ids:
         logger.warning("Path MediaMTX inválido em on_ready: %s", body.path)
         return {"ok": True}
@@ -128,7 +131,15 @@ async def mediamtx_on_ready(body: MediaMTXOnReadyPayload, request: Request) -> d
     tenant_id, camera_id = ids
     logger.info("Stream pronto: tenant=%s camera=%s", tenant_id, camera_id)
 
-    # Publica evento para Celery processar atualização de status
+    from sqlalchemy import update as sa_update
+    from vms.cameras.models import CameraModel
+    stmt = (
+        sa_update(CameraModel)
+        .where(CameraModel.id == camera_id, CameraModel.tenant_id == tenant_id)
+        .values(is_online=True, last_seen_at=datetime.utcnow())
+    )
+    await db.execute(stmt)
+
     from vms.core.event_bus import publish_event
     await publish_event(
         "camera.online",
@@ -144,14 +155,23 @@ async def mediamtx_on_ready(body: MediaMTXOnReadyPayload, request: Request) -> d
     summary="Webhook MediaMTX — stream encerrado",
     tags=["webhooks"],
 )
-async def mediamtx_on_not_ready(body: MediaMTXOnNotReadyPayload) -> dict:
+async def mediamtx_on_not_ready(body: MediaMTXOnNotReadyPayload, db: DbSession) -> dict:
     """Marca câmera como offline quando stream é encerrado."""
-    ids = _parse_mediamtx_path(body.path)
+    ids = _parse_mediamtx_path(body.path) or await _resolve_live_path(body.path, db)
     if not ids:
         return {"ok": True}
 
     tenant_id, camera_id = ids
     logger.info("Stream encerrado: tenant=%s camera=%s", tenant_id, camera_id)
+
+    from sqlalchemy import update as sa_update
+    from vms.cameras.models import CameraModel
+    stmt = (
+        sa_update(CameraModel)
+        .where(CameraModel.id == camera_id, CameraModel.tenant_id == tenant_id)
+        .values(is_online=False)
+    )
+    await db.execute(stmt)
 
     from vms.core.event_bus import publish_event
     await publish_event(
@@ -168,17 +188,31 @@ async def mediamtx_on_not_ready(body: MediaMTXOnNotReadyPayload) -> dict:
     summary="Webhook MediaMTX — segmento de gravação pronto",
     tags=["webhooks"],
 )
-async def mediamtx_segment_ready(body: MediaMTXSegmentPayload) -> dict:
-    """Enfileira tarefa de indexação do segmento de gravação."""
-    ids = _parse_mediamtx_path(body.path)
+async def mediamtx_segment_ready(body: MediaMTXSegmentPayload, db: DbSession) -> dict:
+    """Indexa segmento de gravação e publica evento no bus."""
+    ids = _parse_mediamtx_path(body.path) or await _resolve_live_path(body.path, db)
     if not ids:
         logger.warning("Path MediaMTX inválido em segment_ready: %s", body.path)
         return {"ok": True}
 
+    tenant_id, camera_id = ids
     logger.info("Segmento pronto: %s -> %s", body.path, body.segment_path)
 
+    # Indexa o segmento diretamente no banco de dados
+    from vms.recordings.repository import ClipRepository, RecordingSegmentRepository
+    from vms.recordings.service import RecordingService
+    svc = RecordingService(RecordingSegmentRepository(db), ClipRepository(db))
+    try:
+        await svc.index_segment(
+            tenant_id=tenant_id,
+            camera_id=camera_id,
+            file_path=body.segment_path,
+            mediamtx_path=body.path,
+        )
+    except Exception:
+        logger.exception("Erro ao indexar segmento: %s", body.segment_path)
+
     from vms.core.event_bus import publish_event
-    tenant_id, camera_id = ids
     await publish_event(
         "recording.segment_ready",
         {"camera_id": camera_id, "path": body.path, "segment_path": body.segment_path},
@@ -222,11 +256,35 @@ async def list_events(
 # ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _parse_mediamtx_path(path: str) -> tuple[str, str] | None:
-    """Extrai (tenant_id, camera_id) do path MediaMTX 'tenant-{x}/cam-{y}'."""
+    """
+    Extrai (tenant_id, camera_id) do path MediaMTX.
+
+    Suporta dois formatos:
+    - tenant-{tid}/cam-{cid} → extração direta
+    - live/{stream_key}      → requer lookup no DB (ver _resolve_live_path)
+    """
     match = _MEDIAMTX_PATH_RE.match(path)
     if not match:
         return None
     return match.group("tenant_id"), match.group("camera_id")
+
+
+async def _resolve_live_path(path: str, db) -> tuple[str, str] | None:
+    """
+    Resolve (tenant_id, camera_id) para paths no formato live/{stream_key}.
+
+    Faz lookup no banco pelo rtmp_stream_key da câmera.
+    """
+    live_match = _LIVE_PATH_RE.match(path)
+    if not live_match:
+        return None
+    stream_key = live_match.group("stream_key")
+    from vms.cameras.repository import CameraRepository
+    repo = CameraRepository(db)
+    camera = await repo.get_by_stream_key(stream_key)
+    if not camera:
+        return None
+    return camera.tenant_id, camera.id
 
 
 def _resolve_tenant(camera_id: str) -> str:

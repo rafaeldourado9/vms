@@ -40,19 +40,43 @@ async def list_recordings(
     claims: CurrentUser,
     db: DbSession,
     camera_id: str = Query(..., description="ID da câmera"),
-    started_after: datetime | None = Query(default=None),
-    started_before: datetime | None = Query(default=None),
+    started_after: str | None = Query(default=None, description="Filtro inicial (ISO 8601)"),
+    started_before: str | None = Query(default=None, description="Filtro final (ISO 8601)"),
     page: int = Query(default=1, ge=1),
-    page_size: int = Query(default=50, ge=1, le=200),
+    page_size: int = Query(default=50, ge=1, le=500),
 ) -> SegmentListResponse:
     """Lista segmentos de gravação de uma câmera com filtro de período."""
+    # Parse manual dos datetimes para evitar 422 em formatos inválidos
+    from datetime import datetime as DT
+    
+    parsed_after: DT | None = None
+    parsed_before: DT | None = None
+    
+    if started_after:
+        try:
+            parsed_after = DT.fromisoformat(started_after.replace('Z', '+00:00'))
+        except (ValueError, AttributeError):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Formato de data inválido para started_after: {started_after}. Use ISO 8601."
+            )
+    
+    if started_before:
+        try:
+            parsed_before = DT.fromisoformat(started_before.replace('Z', '+00:00'))
+        except (ValueError, AttributeError):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail=f"Formato de data inválido para started_before: {started_before}. Use ISO 8601."
+            )
+    
     offset = (page - 1) * page_size
     svc = _recording_svc(db)
     segments, total = await svc._segments.list_by_camera(
         tenant_id=claims.tenant_id,
         camera_id=camera_id,
-        started_after=started_after,
-        started_before=started_before,
+        started_after=parsed_after,
+        started_before=parsed_before,
         limit=page_size,
         offset=offset,
     )
@@ -70,40 +94,56 @@ async def get_timeline(
     camera_id: str,
     claims: CurrentUser,
     db: DbSession,
-    started_after: datetime | None = Query(default=None),
-    started_before: datetime | None = Query(default=None),
+    started_after: str | None = Query(default=None),
+    started_before: str | None = Query(default=None),
 ) -> list[TimelineHourResponse]:
     """
     Retorna segmentos agrupados por hora para UI de playback.
 
     Calcula cobertura (coverage_pct) por hora baseado na duração dos segmentos.
     """
+    from datetime import datetime as DT
+
+    # Parse datetimes manualmente
+    parsed_after: DT | None = None
+    parsed_before: DT | None = None
+    if started_after:
+        try:
+            parsed_after = DT.fromisoformat(started_after.replace('Z', '+00:00'))
+        except (ValueError, AttributeError):
+            pass
+    if started_before:
+        try:
+            parsed_before = DT.fromisoformat(started_before.replace('Z', '+00:00'))
+        except (ValueError, AttributeError):
+            pass
+
     svc = _recording_svc(db)
     segments, _ = await svc._segments.list_by_camera(
         tenant_id=claims.tenant_id,
         camera_id=camera_id,
-        started_after=started_after,
-        started_before=started_before,
+        started_after=parsed_after,
+        started_before=parsed_before,
         limit=10000,
         offset=0,
     )
 
     # Agrupa por hora
-    hours: dict[datetime, list] = {}
+    hours: dict[int, list] = {}
     for seg in segments:
         started = seg.started_at
         if started.tzinfo is None:
             started = started.replace(tzinfo=timezone.utc)
-        hour_key = started.replace(minute=0, second=0, microsecond=0)
+        hour_key = started.hour  # 0-23
         hours.setdefault(hour_key, []).append(seg)
 
     result = []
-    for hour_dt, hour_segs in sorted(hours.items()):
+    for hour_int, hour_segs in sorted(hours.items()):
         total_duration = sum(s.duration_seconds for s in hour_segs)
         coverage_pct = min(total_duration / 3600.0, 1.0)
         result.append(
             TimelineHourResponse(
-                hour=hour_dt,
+                hour=hour_int,
                 segments=[RecordingSegmentResponse.model_validate(s) for s in hour_segs],
                 coverage_pct=round(coverage_pct, 4),
             )
@@ -169,14 +209,14 @@ async def download_recording(
     claims: CurrentUser,
     db: DbSession,
 ) -> dict:
-    """Retorna URL de download do arquivo de gravação (redirect para nginx)."""
+    """Retorna URL de download do arquivo de gravação servido pelo nginx."""
     svc = _recording_svc(db)
     segment = await svc._segments.get_by_id(recording_id, claims.tenant_id)
     if not segment:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Gravação não encontrada")
-    import os
-    filename = os.path.basename(segment.file_path)
-    download_url = f"/recordings/{filename}"
+    # file_path é /recordings/tenant-X/cam-Y/YYYY/MM/DD/HH-MM-SS.mp4
+    # Nginx serve /recordings/ com alias /recordings/ — URL = file_path direto
+    download_url = segment.file_path
     return {"download_url": download_url, "file_path": segment.file_path}
 
 

@@ -36,10 +36,11 @@ class AnalyticsResult:
     plugin: str
     camera_id: str
     tenant_id: str
-    roi_id: str
     event_type: str
     payload: dict
     occurred_at: datetime
+    confidence: float | None = None
+    roi_id: str | None = None  # preenchido quando plugin usa zonas locais
 
 
 class AnalyticsPlugin(ABC):

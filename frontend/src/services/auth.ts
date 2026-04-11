@@ -12,8 +12,11 @@ export const authService = {
     return res.data
   },
 
-  async me(): Promise<User> {
-    const res = await api.get<User>('/users/me')
+  async me(accessToken?: string): Promise<User> {
+    const config = accessToken
+      ? { headers: { Authorization: `Bearer ${accessToken}` } }
+      : {}
+    const res = await api.get<User>('/users/me', config)
     return res.data
   },
 }

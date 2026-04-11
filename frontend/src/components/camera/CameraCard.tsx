@@ -1,7 +1,7 @@
-import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Play, Settings, WifiOff, Brain } from 'lucide-react'
+import { Play, Settings, Brain } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
+import { Thumbnail } from './Thumbnail'
 import type { Camera } from '@/types'
 
 interface CameraCardProps {
@@ -10,8 +10,6 @@ interface CameraCardProps {
 
 export function CameraCard({ camera }: CameraCardProps) {
   const navigate = useNavigate()
-  const [imgError, setImgError] = useState(false)
-  const snapshotUrl = `/api/v1/cameras/${camera.id}/snapshot`
 
   return (
     <div
@@ -21,18 +19,7 @@ export function CameraCard({ camera }: CameraCardProps) {
     >
       {/* Thumbnail */}
       <div className="relative aspect-video bg-black">
-        {!imgError ? (
-          <img
-            src={snapshotUrl}
-            alt={camera.name}
-            className="w-full h-full object-cover"
-            onError={() => setImgError(true)}
-          />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center">
-            <WifiOff size={24} className="text-zinc-700" />
-          </div>
-        )}
+        <Thumbnail cameraId={camera.id} className="w-full h-full" />
 
         {/* Status dot */}
         <div

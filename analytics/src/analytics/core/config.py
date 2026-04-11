@@ -16,7 +16,8 @@ class Settings(BaseSettings):
 
     # ─── VMS API ───────────────────────────────────────────────────────────
     vms_api_url: str = Field(default="http://localhost:8000")
-    vms_analytics_api_key: str = Field(default="dev-analytics-key")
+    vms_api_key: str = Field(default="dev-analytics-key")
+    mediamtx_host: str = Field(default="mediamtx")
 
     # ─── Redis ─────────────────────────────────────────────────────────────
     redis_url: str = Field(default="redis://localhost:6379/1")

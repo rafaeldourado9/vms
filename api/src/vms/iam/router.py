@@ -122,6 +122,60 @@ async def create_tenant(
 # ─── Usuários ─────────────────────────────────────────────────────────────────
 
 @router.get(
+    "/users",
+    response_model=list[UserResponse],
+    summary="Listar usuários do tenant",
+    tags=["users"],
+)
+async def list_users(
+    claims: CurrentUser,
+    db: DbSession,
+    email_filter: str | None = None,
+    role: str | None = None,
+    is_active: bool | None = None,
+) -> list[UserResponse]:
+    """Lista usuários do tenant do usuário autenticado. Admins veem todos."""
+    from vms.iam.domain import UserRole
+    from vms.iam.models import UserModel
+    from vms.iam.service import UserService
+    from sqlalchemy import select
+    
+    svc = UserService(UserRepository(db), TenantRepository(db))
+    
+    # Monta query com filtros opcionais
+    stmt = select(UserModel).where(UserModel.tenant_id == claims.tenant_id)
+    
+    if email_filter:
+        stmt = stmt.where(UserModel.email.ilike(f"%{email_filter}%"))
+    if role:
+        stmt = stmt.where(UserModel.role == UserRole(role))
+    if is_active is not None:
+        stmt = stmt.where(UserModel.is_active.is_(is_active))
+    
+    # Admin pode ver todos os tenants, outros veem só o seu
+    # claims.role é string (não enum)
+    if claims.role != "admin":
+        stmt = stmt.where(UserModel.tenant_id == claims.tenant_id)
+    
+    stmt = stmt.order_by(UserModel.created_at.desc())
+    result = await db.execute(stmt)
+    users = result.scalars().all()
+    
+    return [
+        UserResponse(
+            id=u.id,
+            tenant_id=u.tenant_id,
+            email=u.email,
+            full_name=u.full_name,
+            role=u.role,
+            is_active=u.is_active,
+            created_at=u.created_at,
+        )
+        for u in users
+    ]
+
+
+@router.get(
     "/users/me",
     response_model=UserResponse,
     summary="Perfil do usuário atual",
@@ -136,7 +190,7 @@ async def get_me(claims: CurrentUser, db: DbSession) -> UserResponse:
         tenant_id=user.tenant_id,
         email=user.email,
         full_name=user.full_name,
-        role=user.role.value,
+        role=user.role,
         is_active=user.is_active,
         created_at=user.created_at,
     )
@@ -169,7 +223,7 @@ async def create_user(
         tenant_id=user.tenant_id,
         email=user.email,
         full_name=user.full_name,
-        role=user.role.value,
+        role=user.role,
         is_active=user.is_active,
         created_at=user.created_at,
     )

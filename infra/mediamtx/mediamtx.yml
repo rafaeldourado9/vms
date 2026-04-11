@@ -117,10 +117,9 @@ pathDefaults:
   maxReaders: 100
 
   # ── Gravação 24/7 ──────────────────────────────────────────────────────────
-  # Segmentos de 60s em fmp4 dentro de /recordings/{tenant-X}/cam-Y/YYYY/MM/DD/
-  # Retenção gerenciada pelo VMS (ARQ task cleanup_segments) — MediaMTX não deleta.
   record: yes
-  recordPath: /recordings/%path/%Y/%m/%d/%H-%M-%S.mp4
+  # NOTA: recordPath NÃO deve ter extensão — MediaMTX adiciona baseado no recordFormat
+  recordPath: /recordings/%path/%Y/%m/%d/%H-%M-%S
   recordFormat: fmp4
   recordPartDuration: 10s
   recordSegmentDuration: 60s
@@ -129,14 +128,14 @@ pathDefaults:
   # ── Hooks de status de stream ──────────────────────────────────────────────
   # on_ready: câmera ficou online → VMS marca camera.is_online = True
   runOnReady: >-
-    curl -s -X POST http://api:8000/webhooks/mediamtx/on_ready
+    curl -s -X POST http://api:8000/api/v1/webhooks/mediamtx/on_ready
     -H "Content-Type: application/json"
     -d "{\"path\":\"$MTX_PATH\",\"source_type\":\"$MTX_SOURCE_TYPE\",\"source_id\":\"$MTX_SOURCE_ID\"}"
   runOnReadyRestart: no
 
   # on_not_ready: câmera ficou offline → VMS marca camera.is_online = False
   runOnNotReady: >-
-    curl -s -X POST http://api:8000/webhooks/mediamtx/on_not_ready
+    curl -s -X POST http://api:8000/api/v1/webhooks/mediamtx/on_not_ready
     -H "Content-Type: application/json"
     -d "{\"path\":\"$MTX_PATH\",\"source_type\":\"$MTX_SOURCE_TYPE\",\"source_id\":\"$MTX_SOURCE_ID\"}"
 
@@ -148,7 +147,7 @@ pathDefaults:
   # Disparado a cada 60s quando segmento de gravação é completado.
   # VMS indexa o segmento (RecordingSegment) e verifica retenção.
   runOnRecordSegmentComplete: >-
-    curl -s -X POST http://api:8000/webhooks/mediamtx/segment_ready
+    curl -s -X POST http://api:8000/api/v1/webhooks/mediamtx/segment_ready
     -H "Content-Type: application/json"
     -d "{\"path\":\"$MTX_PATH\",\"segment_path\":\"$MTX_SEGMENT_PATH\",\"duration\":\"$MTX_SEGMENT_DURATION\"}"
 

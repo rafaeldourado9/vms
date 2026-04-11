@@ -1,4 +1,4 @@
-"""Script CLI para criação de tenant com usuário administrador.
+"""Script CLI para criação de tenant com usuário administrador e agente nativo.
 
 Uso:
     python -m vms.scripts.create_tenant \\
@@ -13,12 +13,13 @@ import argparse
 import asyncio
 import sys
 import uuid
+from datetime import UTC, datetime
 
 
 def _parse_args() -> argparse.Namespace:
     """Configura e parseia os argumentos da linha de comando."""
     parser = argparse.ArgumentParser(
-        description="Cria um tenant com usuário administrador inicial."
+        description="Cria um tenant com usuário administrador inicial e agente nativo."
     )
     parser.add_argument("--name", required=True, help="Nome do tenant")
     parser.add_argument("--slug", required=True, help="Slug único do tenant (ex: empresa-abc)")
@@ -28,10 +29,11 @@ def _parse_args() -> argparse.Namespace:
 
 
 async def _run(name: str, slug: str, admin_email: str, admin_password: str) -> None:
-    """Executa a criação do tenant e do usuário admin."""
+    """Executa a criação do tenant, usuário admin e agente nativo."""
+    from vms.cameras.models import AgentModel
     from vms.core.database import close_db, create_engine, get_db_context, init_db
-    from vms.core.security import hash_password
-    from vms.iam.models import TenantModel, UserModel
+    from vms.core.security import generate_api_key, hash_password
+    from vms.iam.models import ApiKeyModel, TenantModel, UserModel
 
     engine = create_engine()
     init_db(engine)
@@ -69,11 +71,46 @@ async def _run(name: str, slug: str, admin_email: str, admin_password: str) -> N
         session.add(user)
         await session.flush()
 
+        # Cria agente nativo (agente built-in do tenant)
+        agent_id = str(uuid.uuid4())
+        agent = AgentModel(
+            id=agent_id,
+            tenant_id=tenant.id,
+            name=f"agent-{slug}",
+            status="pending",
+            streams_running=0,
+            streams_failed=0,
+            created_at=datetime.now(UTC),
+        )
+        session.add(agent)
+        await session.flush()
+
+        # Cria API key para o agente
+        plain_key, key_hash, prefix = generate_api_key()
+        api_key = ApiKeyModel(
+            id=str(uuid.uuid4()),
+            tenant_id=tenant.id,
+            owner_type="agent",
+            owner_id=agent_id,
+            key_hash=key_hash,
+            prefix=prefix,
+            is_active=True,
+        )
+        session.add(api_key)
+        await session.flush()
+
         print(f"Tenant criado com sucesso!")
         print(f"  tenant_id : {tenant.id}")
         print(f"  slug      : {tenant.slug}")
         print(f"  user_id   : {user.id}")
         print(f"  email     : {user.email}")
+        print(f"")
+        print(f"Agente nativo criado automaticamente:")
+        print(f"  agent_id  : {agent_id}")
+        print(f"  nome      : {agent.name}")
+        print(f"  api_key   : {plain_key}")
+        print(f"")
+        print(f"  ⚠️  Armazene a API key com segurança — ela não será exibida novamente!")
 
     await close_db()
 

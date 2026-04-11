@@ -2,7 +2,6 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { Eye, EyeOff, Loader2 } from 'lucide-react'
 import { authService } from '@/services/auth'
-import { usersService } from '@/services/users'
 import { useAuthStore } from '@/store/authStore'
 import { useThemeStore } from '@/store/themeStore'
 
@@ -27,15 +26,23 @@ export function LoginPage() {
     setIsLoading(true)
     try {
       const tokens = await authService.login(email, password)
-      const user   = await usersService.me()
+      const user   = await authService.me(tokens.access_token)
       login(tokens, user)
       navigate('/dashboard', { replace: true })
     } catch (err: unknown) {
-      const axiosErr = err as { response?: { status?: number } }
-      if (axiosErr.response?.status === 401) {
+      const axiosErr = err as { response?: { status?: number; data?: { detail?: unknown } } }
+      const status = axiosErr.response?.status
+
+      if (status === 401) {
         setError('Email ou senha incorretos.')
-      } else if (axiosErr.response?.status === 429) {
+      } else if (status === 429) {
         setError('Muitas tentativas. Aguarde antes de tentar novamente.')
+      } else if (status === 422) {
+        const detail = axiosErr.response?.data?.detail
+        const msgs = Array.isArray(detail)
+          ? detail.map((d: { msg?: string }) => d.msg).filter(Boolean).join(', ')
+          : typeof detail === 'string' ? detail : 'Dados inválidos.'
+        setError(`Validação: ${msgs}`)
       } else {
         setError('Erro ao fazer login. Tente novamente.')
       }

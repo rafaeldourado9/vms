@@ -15,6 +15,7 @@ from vms.cameras.domain import (
     CameraManufacturer,
     OnvifProbeResult,
     StreamProtocol,
+    StreamQuality,
     StreamUrls,
 )
 from vms.cameras.mediamtx import MediaMTXClient
@@ -42,7 +43,12 @@ class CameraService:
         name: str,
         manufacturer: str = "generic",
         location: str | None = None,
+        address: str | None = None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        ia_enabled: bool = False,
         retention_days: int = 7,
+        stream_quality: StreamQuality = StreamQuality.HIGH,
         stream_protocol: StreamProtocol = StreamProtocol.RTSP_PULL,
         rtsp_url: str | None = None,
         agent_id: str | None = None,
@@ -51,7 +57,18 @@ class CameraService:
         onvif_password: str | None = None,
     ) -> Camera:
         """Cria câmera de acordo com o protocolo e registra no MediaMTX."""
+        # Verifica unicidade apenas entre câmeras ativas
+        existing_by_name = await self._cameras.get_by_name(name, tenant_id, only_active=True)
+        if existing_by_name:
+            raise ValidationError(f"Já existe uma câmera com o nome '{name}' neste tenant")
+
+        if rtsp_url:
+            existing_by_url = await self._cameras.get_by_rtsp_url(rtsp_url, tenant_id, only_active=True)
+            if existing_by_url:
+                raise ValidationError(f"Já existe uma câmera com a URL RTSP '{rtsp_url[:50]}...' neste tenant")
+
         rtmp_stream_key: str | None = None
+        ptz_supported: bool = False
 
         if stream_protocol == StreamProtocol.RTMP_PUSH:
             rtmp_stream_key = Camera.generate_stream_key()
@@ -63,17 +80,21 @@ class CameraService:
             # Se rtsp_url não foi fornecida, tenta extrair via probe
             if not rtsp_url:
                 from vms.cameras.onvif_client import OnvifClient
+                from vms.cameras.ptz.client import PtzClient
                 probe = await OnvifClient.probe(onvif_url, onvif_username or "", onvif_password or "")
                 if probe.reachable and probe.rtsp_url:
                     rtsp_url = probe.rtsp_url
                     if probe.manufacturer and probe.manufacturer != "unknown":
                         manufacturer = probe.manufacturer.lower()
+                ptz_supported = await PtzClient.check_ptz_supported(
+                    onvif_url, onvif_username or "", onvif_password or ""
+                )
 
         camera = Camera(
             id=str(uuid.uuid4()),
             tenant_id=tenant_id,
             name=name,
-            manufacturer=CameraManufacturer(manufacturer),
+            manufacturer=CameraManufacturer(manufacturer if manufacturer in CameraManufacturer._value2member_map_ else "generic"),
             stream_protocol=stream_protocol,
             rtsp_url=rtsp_url,
             rtmp_stream_key=rtmp_stream_key,
@@ -81,11 +102,21 @@ class CameraService:
             onvif_username=onvif_username,
             onvif_password=onvif_password,
             location=location,
+            address=address,
+            latitude=latitude,
+            longitude=longitude,
+            ia_enabled=ia_enabled,
             retention_days=retention_days,
+            stream_quality=stream_quality,
             agent_id=agent_id,
+            ptz_supported=ptz_supported,
         )
         saved = await self._cameras.create(camera)
-        await self._mediamtx.add_path(saved.mediamtx_path)
+        # Registra path no MediaMTX com source URL se houver RTSP
+        source_url = saved.rtsp_url if saved.stream_protocol in (
+            StreamProtocol.RTSP_PULL, StreamProtocol.ONVIF
+        ) else ""
+        await self._mediamtx.add_path(saved.mediamtx_path, source_url=source_url)
         if saved.agent_id:
             await _notify_agent(saved.agent_id, "camera_added", {"camera_id": saved.id})
         return saved
@@ -114,16 +145,31 @@ class CameraService:
         onvif_password: str | None = None,
         manufacturer: str | None = None,
         location: str | None = None,
+        address: str | None = None,
+        latitude: float | None = None,
+        longitude: float | None = None,
+        ia_enabled: bool | None = None,
         retention_days: int | None = None,
+        stream_quality: StreamQuality | None = None,
         agent_id: str | None = None,
         is_active: bool | None = None,
     ) -> Camera:
         """Atualiza campos fornecidos da câmera."""
         camera = await self.get_camera(camera_id, tenant_id)
-        if name is not None:
+        
+        # Validações de unicidade se nome ou rtsp_url estão sendo alterados
+        if name is not None and name != camera.name:
+            existing_by_name = await self._cameras.get_by_name(name, tenant_id, only_active=False)
+            if existing_by_name:
+                raise ValidationError(f"Já existe uma câmera com o nome '{name}' neste tenant")
             camera.name = name
-        if rtsp_url is not None:
+        
+        if rtsp_url is not None and rtsp_url != camera.rtsp_url:
+            existing_by_url = await self._cameras.get_by_rtsp_url(rtsp_url, tenant_id, only_active=False)
+            if existing_by_url:
+                raise ValidationError(f"Já existe uma câmera com a URL RTSP '{rtsp_url[:50]}...' neste tenant")
             camera.rtsp_url = rtsp_url
+        
         if onvif_url is not None:
             camera.onvif_url = onvif_url
         if onvif_username is not None:
@@ -131,16 +177,34 @@ class CameraService:
         if onvif_password is not None:
             camera.onvif_password = onvif_password
         if manufacturer is not None:
-            camera.manufacturer = CameraManufacturer(manufacturer)
+            camera.manufacturer = CameraManufacturer(manufacturer if manufacturer in CameraManufacturer._value2member_map_ else "generic")
         if location is not None:
             camera.location = location
+        if address is not None:
+            camera.address = address
+        if latitude is not None:
+            camera.latitude = latitude
+        if longitude is not None:
+            camera.longitude = longitude
+        if ia_enabled is not None:
+            camera.ia_enabled = ia_enabled
         if retention_days is not None:
             camera.retention_days = retention_days
+        if stream_quality is not None:
+            camera.stream_quality = stream_quality
         if agent_id is not None:
             camera.agent_id = agent_id
         if is_active is not None:
             camera.is_active = is_active
         updated = await self._cameras.update(camera)
+
+        # Re-provision MediaMTX path se RTSP URL mudou
+        if rtsp_url is not None:
+            source_url = updated.rtsp_url if updated.stream_protocol in (
+                StreamProtocol.RTSP_PULL, StreamProtocol.ONVIF
+            ) else ""
+            await self._mediamtx.add_path(updated.mediamtx_path, source_url=source_url)
+
         if updated.agent_id:
             await _notify_agent(updated.agent_id, "config_updated", {"camera_id": updated.id})
         return updated
@@ -161,6 +225,12 @@ class CameraService:
         camera = await self.get_camera(camera_id, tenant_id)
         settings = get_settings()
         path = camera.mediamtx_path
+
+        # Log para debug
+        logger.info(
+            "Gerando stream URLs: camera=%s tenant=%s path=%s host=%s",
+            camera_id, tenant_id, path, mediamtx_host
+        )
 
         return StreamUrls(
             hls_url=f"http://{mediamtx_host}:8888/{path}/index.m3u8?token={viewer_token}",

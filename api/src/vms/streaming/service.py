@@ -13,6 +13,7 @@ from vms.streaming.repository import StreamSessionRepositoryPort
 logger = logging.getLogger(__name__)
 
 _PATH_RE = re.compile(r"tenant-(?P<tenant_id>[^/]+)/cam-(?P<camera_id>.+)")
+_LIVE_RE = re.compile(r"live/(?P<stream_key>[^/]+?)(?:\.stream)?$")
 
 
 class StreamingService:
@@ -33,9 +34,20 @@ class StreamingService:
         Registra início de sessão quando stream fica pronto.
 
         Extrai tenant_id e camera_id do path MediaMTX.
+        Suporta paths tenant-{tid}/cam-{cid} e live/{stream_key}.
         Retorna None se path inválido.
         """
         ids = _parse_path(mediamtx_path)
+
+        # Tenta resolver via stream_key para paths live/{key}
+        if not ids:
+            live_match = _LIVE_RE.match(mediamtx_path)
+            if live_match and self._camera_repo:
+                stream_key = live_match.group("stream_key")
+                camera = await self._camera_repo.get_by_stream_key(stream_key)
+                if camera:
+                    ids = (camera.tenant_id, camera.id)
+
         if not ids:
             logger.warning("Path inválido em on_stream_ready: %s", mediamtx_path)
             return None
@@ -58,6 +70,7 @@ class StreamingService:
         """
         Encerra sessão quando stream é parado.
 
+        Suporta paths tenant-{tid}/cam-{cid} e live/{stream_key}.
         Retorna sessão encerrada ou None se não havia sessão ativa.
         """
         ended = await self._repo.end_session(mediamtx_path)
@@ -71,11 +84,26 @@ class StreamingService:
         """
         Verifica se o token de publicação é válido.
 
-        Para câmeras RTMP push: compara token com rtmp_stream_key da câmera.
-        Para agents (rtsp_pull/onvif): valida como API key do agent.
+        Suporta dois formatos de path:
+        - tenant-{tid}/cam-{cid} → valida stream_key ou API key do agent
+        - live/{stream_key}[.stream] → lookup pelo stream_key na câmera
         """
+        if not token and not path:
+            return False
+
+        # Formato RTMP push: live/{stream_key} ou live/{stream_key}.stream
+        live_match = _LIVE_RE.match(path)
+        if live_match:
+            stream_key = live_match.group("stream_key")
+            if self._camera_repo:
+                camera = await self._camera_repo.get_by_stream_key(stream_key)
+                if camera and camera.rtmp_stream_key == stream_key:
+                    return True
+            return False
+
+        # Formato legacy: tenant-{tid}/cam-{cid}
         ids = _parse_path(path)
-        if not ids or not token:
+        if not ids:
             return False
 
         tenant_id, camera_id = ids
@@ -108,7 +136,7 @@ class StreamingService:
         Verifica se o token de viewer é válido para o path dado.
 
         Valida JWT de tipo 'viewer' e confere se o camera_id do token
-        corresponde ao path do MediaMTX.
+        corresponde ao path do MediaMTX (suporta tenant-path e live-path).
         """
         if not token:
             return False
@@ -120,6 +148,16 @@ class StreamingService:
                 return False
 
             ids = _parse_path(path)
+
+            # Para live/{stream_key}, resolve camera_id pelo stream_key
+            if not ids:
+                live_match = _LIVE_RE.match(path)
+                if live_match and self._camera_repo:
+                    stream_key = live_match.group("stream_key")
+                    camera = await self._camera_repo.get_by_stream_key(stream_key)
+                    if camera:
+                        ids = (camera.tenant_id, camera.id)
+
             if not ids:
                 return False
 
@@ -130,7 +168,13 @@ class StreamingService:
 
 
 def _parse_path(path: str) -> tuple[str, str] | None:
-    """Extrai (tenant_id, camera_id) do path MediaMTX."""
+    """
+    Extrai (tenant_id, camera_id) do path MediaMTX.
+
+    Suporta formatos:
+    - tenant-{tid}/cam-{cid}
+    - live/{stream_key}[.stream] → retorna None (stream_key path é tratado separadamente)
+    """
     match = _PATH_RE.match(path)
     if not match:
         return None
