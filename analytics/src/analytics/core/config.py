@@ -30,8 +30,16 @@ class Settings(BaseSettings):
     analytics_workers: int = Field(default=4, description="Workers paralelos")
     yolo_imgsz: int = Field(default=640, description="Tamanho de imagem para YOLO")
     yolo_conf: float = Field(default=0.30, description="Confiança mínima YOLO")
+
+    # Modelos YOLO
     yolo_model_path: str = Field(default="/models/yolov8n.pt")
     lpr_model_path: str = Field(default="/models/yolov8n-plate.pt")
+    fire_smoke_model_path: str = Field(default="/models/fire.pt")
+    ppe_model_path: str = Field(default="/models/ppe.pt")
+    biker_model_path: str = Field(default="/models/biker_2.pt")
+    horse_cart_model_path: str = Field(default="/models/horse_cart.pt")
+    traffic_model_path: str = Field(default="/models/traffic.pt")
+    object_model_path: str = Field(default="/models/object.pt")
 
     # ─── Observabilidade ───────────────────────────────────────────────────
     log_level: str = Field(default="INFO")
