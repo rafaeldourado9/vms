@@ -203,6 +203,7 @@ def _include_routers(app: FastAPI) -> None:
     from vms.sse.router import router as sse_router
     from vms.plugins.router import router as plugins_router
     from vms.webhooks_public.router import router as public_webhooks_router
+    from vms.analytics.router import router as analytics_router
 
     # Health — sem prefixo /api/v1
     app.include_router(health_router)
@@ -230,6 +231,9 @@ def _include_routers(app: FastAPI) -> None:
 
     # Contrato público de plugins externos
     app.include_router(plugins_router, prefix="/api/v1")
+
+    # Analytics — catálogo e eventos
+    app.include_router(analytics_router, prefix="/api/v1")
 
 
 app = create_app()

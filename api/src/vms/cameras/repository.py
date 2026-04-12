@@ -110,6 +110,15 @@ class CameraRepository:
         result = await self._session.scalar(stmt)
         return _camera_to_domain(result) if result else None
 
+    async def get_by_mediamtx_path(self, mediamtx_path: str) -> Camera | None:
+        """Busca câmera pelo mediamtx_path (usado pelo analytics)."""
+        stmt = select(CameraModel).where(
+            CameraModel.mediamtx_path == mediamtx_path,
+            CameraModel.is_active.is_(True),
+        )
+        result = await self._session.scalar(stmt)
+        return _camera_to_domain(result) if result else None
+
     async def get_by_name(self, name: str, tenant_id: str, only_active: bool = True) -> Camera | None:
         """Busca câmera por nome dentro do tenant.
         

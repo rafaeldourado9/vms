@@ -78,8 +78,10 @@ services:
       - RECORDINGS_PATH=/recordings
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ENVIRONMENT=${ENVIRONMENT:-production}
+      - VMS_API_KEY=${VMS_API_KEY:-dev-analytics-key}
     volumes:
       - recordings:/recordings
+      - tunnel_data:/tunnel:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -117,7 +119,7 @@ services:
         condition: service_healthy
     networks: [vms]
 
-  # ─── Analytics Service (plugin standalone — opcional) ─────────────────────
+  # ─── Analytics Service (plugin standalone) ───────────────────────────────
   analytics:
     build:
       context: ./analytics
@@ -134,13 +136,18 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - recordings:/recordings
-      - ./models:/models:ro          # modelos YOLO pré-treinados
-      - ./analytics/zones.yaml:/app/zones.yaml:ro  # zonas locais (opcional)
+      - ./analytics/models:/models:ro   # modelos YOLO pré-treinados
     depends_on:
       api:
         condition: service_healthy
-    profiles: [analytics]            # `docker compose --profile analytics up`
     networks: [vms]
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
 
   # ─── Frontend ─────────────────────────────────────────────────────────────
   frontend:
@@ -168,6 +175,22 @@ services:
       - frontend
     networks: [vms]
 
+  # ─── Cloudflare Tunnel (dev — expõe API para webhooks externos) ──────────
+  cloudflared:
+    build:
+      context: ./infra/cloudflared
+    restart: unless-stopped
+    command: >
+      --url http://nginx:80
+      --protocol http2
+      --no-autoupdate
+    volumes:
+      - tunnel_data:/tunnel
+    depends_on:
+      - nginx
+    profiles: [dev]                  # `docker compose --profile dev up`
+    networks: [vms]
+
   # ─── Backup (job pontual — não fica rodando) ──────────────────────────────
   backup:
     build:
@@ -192,6 +215,7 @@ volumes:
   pgdata:
   recordings:
   backups:
+  tunnel_data:
 
 networks:
   vms:

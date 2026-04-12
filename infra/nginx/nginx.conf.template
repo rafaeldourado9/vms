@@ -224,7 +224,7 @@ http {
 
         location = /hik_pro_connect {
             limit_req zone=public_webhook burst=20 nodelay;
-            proxy_pass         http://vms_api;
+            proxy_pass         http://vms_api/webhooks/hik_pro_connect;
             proxy_set_header   Host              $host;
             proxy_set_header   X-Real-IP         $remote_addr;
             proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
@@ -236,7 +236,7 @@ http {
 
         location = /intelbras_events {
             limit_req zone=public_webhook burst=20 nodelay;
-            proxy_pass         http://vms_api;
+            proxy_pass         http://vms_api/webhooks/intelbras_events;
             proxy_set_header   Host              $host;
             proxy_set_header   X-Real-IP         $remote_addr;
             proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
@@ -248,7 +248,7 @@ http {
 
         location = /camera_events {
             limit_req zone=public_webhook burst=20 nodelay;
-            proxy_pass         http://vms_api;
+            proxy_pass         http://vms_api/webhooks/camera_events;
             proxy_set_header   Host              $host;
             proxy_set_header   X-Real-IP         $remote_addr;
             proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;

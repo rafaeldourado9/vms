@@ -17,6 +17,12 @@ dependencies = [
     "pydantic-settings>=2.7",
     # Logging estruturado
     "structlog>=24.4",
+    # Hardware detection
+    "psutil>=5.9",
+    # ML inference (edge)
+    "ultralytics>=8.1,<9",
+    "opencv-python-headless>=4.9,<5",
+    "numpy>=1.26,<3",
 ]
 
 [project.optional-dependencies]

@@ -114,29 +114,24 @@ http {
         location /redoc      { proxy_pass http://vms_api; }
         location /openapi.json { proxy_pass http://vms_api; }
         location /hls/ {
-            auth_request /streaming-auth-check;
             proxy_pass http://mediamtx_hls/;
             proxy_set_header Host $host;
+            proxy_http_version 1.1;
+            proxy_buffering off;
+            proxy_cache off;
         }
         location /webrtc/ {
-            auth_request /streaming-auth-check;
             proxy_pass http://mediamtx_webrtc/;
             proxy_set_header Host $host;
             proxy_http_version 1.1;
             proxy_set_header Upgrade $http_upgrade;
             proxy_set_header Connection "upgrade";
-        }
-        location = /streaming-auth-check {
-            internal;
-            proxy_pass http://vms_api/streaming/auth-check?token=$arg_token&path=$arg_path;
-            proxy_pass_request_body off;
-            proxy_set_header Content-Length "";
-            proxy_set_header X-Original-URI $request_uri;
+            proxy_buffering off;
+            proxy_cache off;
         }
         location /recordings/ {
             alias /recordings/;
             autoindex off;
-            # Byte-range para seeks eficientes (browser faz requests parcial)
             add_header Accept-Ranges bytes always;
             add_header Access-Control-Allow-Origin "*" always;
             add_header Access-Control-Allow-Headers "Range" always;
@@ -144,13 +139,9 @@ http {
         }
         location /internal/ { deny all; return 403; }
 
-        # ── Webhooks públicos (câmeras POSTam eventos diretamente) ─────────
-        # Sem autenticação — câmeras não suportam JWT.
-        # Configuração na câmera: URL = http://vms.seudominio.com/hik_pro_connect
-
         location = /hik_pro_connect {
             limit_req zone=public_webhook burst=20 nodelay;
-            proxy_pass http://vms_api;
+            proxy_pass http://vms_api/webhooks/hik_pro_connect;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -162,7 +153,7 @@ http {
 
         location = /intelbras_events {
             limit_req zone=public_webhook burst=20 nodelay;
-            proxy_pass http://vms_api;
+            proxy_pass http://vms_api/webhooks/intelbras_events;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
@@ -174,7 +165,7 @@ http {
 
         location = /camera_events {
             limit_req zone=public_webhook burst=20 nodelay;
-            proxy_pass http://vms_api;
+            proxy_pass http://vms_api/webhooks/camera_events;
             proxy_set_header Host $host;
             proxy_set_header X-Real-IP $remote_addr;
             proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;

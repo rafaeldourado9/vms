@@ -10,12 +10,13 @@ import { DashboardPage }       from '@/pages/DashboardPage'
 import { CamerasPage }         from '@/pages/CamerasPage'
 import { CameraDetailPage }    from '@/pages/CameraDetailPage'
 import { MosaicPage }          from '@/pages/MosaicPage'
-import { MapPage }             from '@/pages/MapPage'
 import { RecordingsPage }      from '@/pages/RecordingsPage'
 import { EventsPage }          from '@/pages/EventsPage'
 import { NotificationsPage }   from '@/pages/NotificationsPage'
 import { UsersPage }           from '@/pages/UsersPage'
 import { SettingsPage }        from '@/pages/SettingsPage'
+import { AnalyticsCatalog }    from '@/pages/AnalyticsCatalog'
+import { AnalyticsEvents }     from '@/pages/AnalyticsEvents'
 
 // ─── Proteções de segurança no frontend ───────────────────────────────────────
 
@@ -55,10 +56,11 @@ function AuthenticatedApp() {
         <Route path="/cameras"       element={<CamerasPage />} />
         <Route path="/cameras/:id"   element={<CameraDetailPage />} />
         <Route path="/mosaic"        element={<MosaicPage />} />
-        <Route path="/map"           element={<MapPage />} />
         <Route path="/recordings"    element={<RecordingsPage />} />
         <Route path="/events"        element={<EventsPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
+        <Route path="/analytics"     element={<AnalyticsCatalog />} />
+        <Route path="/analytics/events" element={<AnalyticsEvents />} />
         <Route path="/users"         element={<UsersPage />} />
         <Route path="/settings"      element={<SettingsPage />} />
         <Route path="*"              element={<Navigate to="/dashboard" replace />} />

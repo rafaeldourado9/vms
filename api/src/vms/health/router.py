@@ -117,6 +117,26 @@ async def health_check() -> dict:
     }
 
 
+@router.get("/system/server-address", summary="Endereço público do servidor", tags=["health"])
+async def server_address() -> dict:
+    """
+    Retorna a URL do túnel Cloudflare ativo (se disponível).
+
+    A URL é escrita pelo container cloudflared em /tunnel/url quando um
+    quick tunnel é estabelecido. Retorna null se o túnel não estiver ativo.
+    Não requer autenticação.
+    """
+    tunnel_url: str | None = None
+    try:
+        from pathlib import Path
+        p = Path("/tunnel/url")
+        if p.exists():
+            tunnel_url = p.read_text().strip() or None
+    except Exception as exc:
+        logger.debug("Leitura de /tunnel/url falhou: %s", exc)
+    return {"tunnel_url": tunnel_url}
+
+
 @router.get("/metrics", summary="Métricas básicas", tags=["health"])
 async def metrics() -> dict:
     """

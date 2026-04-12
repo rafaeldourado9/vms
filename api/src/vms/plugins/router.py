@@ -2,8 +2,10 @@
 from __future__ import annotations
 
 import logging
+import os
 
 from fastapi import APIRouter, HTTPException, Request, status
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vms.cameras.repository import CameraRepository
@@ -22,11 +24,32 @@ from vms.plugins.service import PluginService
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["plugins"])
 
+# API key do analytics service (configurada via env)
+_ANALYTICS_API_KEY = os.environ.get("VMS_API_KEY", "dev-analytics-key")
+
 
 # ─── Dependência de autenticação por API key ──────────────────────────────────
 
 async def _resolve_plugin_tenant(api_key: ApiKeyHeader, db: DbSession) -> str:
-    """Autentica API key e retorna tenant_id associado."""
+    """Autentica API key e retorna tenant_id associado.
+
+    Aceita tanto API keys do banco quanto a chave env do analytics service.
+    """
+    # Fast-path: chave do analytics service via env (sem lookup no banco)
+    if api_key == _ANALYTICS_API_KEY:
+        result = await db.execute(
+            text("SELECT tenant_id FROM users WHERE role = 'admin' ORDER BY created_at LIMIT 1")
+        )
+        row = result.first()
+        if row:
+            return str(row[0])
+        # Nenhum usuário ainda — analytics aguarda onboarding
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail="Nenhum tenant configurado. Conclua o onboarding primeiro.",
+        )
+
+    # Lookup normal no banco (API keys de agentes/integrações)
     auth_svc = AuthService(
         user_repo=None,  # type: ignore[arg-type]
         api_key_repo=ApiKeyRepository(db),
@@ -135,4 +158,60 @@ async def ingest_plugin_event(
         occurred_at=body.occurred_at,
         payload=body.payload,
     )
+    # Também cria AnalyticsEvent para aparecer no dashboard
+    try:
+        from datetime import datetime, timezone
+        from vms.analytics.models import AnalyticsEvent
+        plugin_id = body.event_type.split(".")[0] if "." in body.event_type else body.event_type
+        severity = body.payload.get("severity", "info") if body.payload else "info"
+        analytics_event = AnalyticsEvent(
+            plugin_installation_id=None,
+            tenant_id=tenant_id,
+            camera_id=body.camera_id,
+            plugin_id=plugin_id,
+            event_type=body.event_type,
+            severity=severity,
+            confidence=body.confidence,
+            payload=body.payload or {},
+            occurred_at=body.occurred_at or datetime.now(timezone.utc),
+        )
+        db.add(analytics_event)
+        await db.flush()
+    except Exception:
+        logger.warning("Falha ao criar AnalyticsEvent espelho (não crítico)", exc_info=True)
+
     return PluginEventResponse(id=event_id)
+
+
+@router.get(
+    "/plugins/rois",
+    summary="ROIs configuradas para as câmeras do tenant",
+)
+async def list_plugin_rois(
+    api_key: ApiKeyHeader,
+    db: DbSession,
+    camera_id: str | None = None,
+) -> list[dict]:
+    """Retorna ROIs (zonas de detecção) para uso pelos plugins."""
+    tenant_id = await _resolve_plugin_tenant(api_key, db)
+    from sqlalchemy import select
+    from vms.analytics.models import AnalyticsROI
+    stmt = select(AnalyticsROI).where(
+        AnalyticsROI.tenant_id == tenant_id,
+        AnalyticsROI.is_active.is_(True),
+    )
+    if camera_id:
+        stmt = stmt.where(AnalyticsROI.camera_id == camera_id)
+    result = await db.execute(stmt)
+    rois = result.scalars().all()
+    return [
+        {
+            "id": str(r.id),
+            "name": r.name,
+            "camera_id": r.camera_id,
+            "plugin_id": r.plugin_id,
+            "polygon_points": r.polygon,
+            "config": r.config,
+        }
+        for r in rois
+    ]

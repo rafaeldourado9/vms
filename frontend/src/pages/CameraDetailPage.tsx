@@ -1,6 +1,10 @@
 import { useEffect, useState } from 'react'
 import { useParams, useNavigate } from 'react-router-dom'
-import { ArrowLeft, Settings, Wifi, Edit2, Save, X, Film, ShieldAlert, Camera as CameraIcon, Copy, Check } from 'lucide-react'
+import {
+  ArrowLeft, Settings, Wifi, Edit2, Save, X, Film, ShieldAlert,
+  Camera as CameraIcon, Copy, Check, ExternalLink, Eye, EyeOff,
+  Download, Radio,
+} from 'lucide-react'
 import { clsx } from 'clsx'
 import { format } from 'date-fns'
 import { camerasService } from '@/services/cameras'
@@ -16,17 +20,128 @@ import toast from 'react-hot-toast'
 
 type Tab = 'live' | 'info' | 'events' | 'clips'
 
-// ─── Webhook URLs section ─────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function webhookUrlFor(manufacturer: string): string {
-  const base = window.location.origin
-  if (manufacturer === 'hikvision') return `${base}/webhooks/hik_pro_connect`
-  if (manufacturer === 'intelbras') return `${base}/webhooks/intelbras_events`
-  return `${base}/webhooks/camera_events`
+function maskRtspPassword(url: string | null | undefined): string {
+  if (!url) return '—'
+  return url.replace(/(rtsp?:\/\/[^:]+:)([^@]+)(@)/, '$1•••$3')
+}
+
+function parseLocation(loc: string | null | undefined): { label: string; href: string | null } {
+  if (!loc) return { label: '—', href: null }
+  try {
+    const u = new URL(loc)
+    if (u.hostname.includes('google') || u.hostname.includes('goo.gl')) {
+      const m = loc.match(/@(-?\d+\.\d+),(-?\d+\.\d+)/) ?? loc.match(/[?&]q=(-?\d+\.\d+),(-?\d+\.\d+)/)
+      if (m) return { label: `${parseFloat(m[1]).toFixed(5)}, ${parseFloat(m[2]).toFixed(5)}`, href: loc }
+      return { label: 'Ver no mapa', href: loc }
+    }
+    return { label: u.hostname + (u.pathname !== '/' ? u.pathname : ''), href: loc }
+  } catch {
+    return { label: loc, href: null }
+  }
+}
+
+function RtspField({ url }: { url: string | null }) {
+  const [show, setShow] = useState(false)
+  if (!url) return <p className="text-sm text-t1 mt-1">—</p>
+  return (
+    <div className="flex items-center gap-2 mt-1">
+      <p className="text-sm text-t1 font-mono break-all flex-1">
+        {show ? url : maskRtspPassword(url)}
+      </p>
+      <button
+        className="btn btn-ghost w-7 h-7 p-0 shrink-0"
+        onClick={() => setShow((s) => !s)}
+        title={show ? 'Ocultar senha' : 'Mostrar senha'}
+      >
+        {show ? <EyeOff size={13} /> : <Eye size={13} />}
+      </button>
+    </div>
+  )
+}
+
+function CopyField({ label, value, copyKey, copied, onCopy }: {
+  label: string
+  value: string
+  copyKey: string
+  copied: string | null
+  onCopy: (v: string, k: string) => void
+}) {
+  return (
+    <div>
+      <label className="label">{label}</label>
+      <div className="flex items-center gap-2 mt-1">
+        <code className="flex-1 text-xs font-mono rounded-lg px-3 py-2 text-t1 break-all"
+          style={{ background: 'var(--elevated)' }}>
+          {value}
+        </code>
+        <button className="btn btn-ghost w-8 h-8 p-0 shrink-0" onClick={() => onCopy(value, copyKey)}
+          title="Copiar">
+          {copied === copyKey
+            ? <Check size={14} style={{ color: 'var(--success)' }} />
+            : <Copy size={14} />}
+        </button>
+      </div>
+    </div>
+  )
+}
+
+function useServerAddress() {
+  const isLocalhost = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
+  const [tunnelUrl, setTunnelUrl] = useState<string | null>(null)
+  const [, setTunnelChecked] = useState(false)
+
+  useEffect(() => {
+    if (!isLocalhost) { setTunnelChecked(true); return }
+
+    let active = true
+    let timer: ReturnType<typeof setTimeout>
+
+    async function poll() {
+      try {
+        const r = await fetch('/system/server-address')
+        const data: { tunnel_url: string | null } = await r.json()
+        if (!active) return
+        setTunnelChecked(true)
+        if (data.tunnel_url) {
+          setTunnelUrl(data.tunnel_url)
+        } else {
+          timer = setTimeout(poll, 3000)
+        }
+      } catch {
+        if (active) timer = setTimeout(poll, 3000)
+      }
+    }
+
+    poll()
+    return () => { active = false; clearTimeout(timer) }
+  }, [isLocalhost])
+
+  if (!isLocalhost) {
+    const port = window.location.port
+    const portSuffix = port && port !== '80' && port !== '443' ? `:${port}` : ''
+    return {
+      ready: true,
+      baseUrl: `${window.location.protocol}//${window.location.hostname}${portSuffix}`,
+      host: window.location.hostname,
+      port: port || '80',
+      tunnelUrl: null as string | null,
+    }
+  }
+
+  if (tunnelUrl) {
+    const hostOnly = tunnelUrl.replace(/^https?:\/\//, '').split('/')[0].split(':')[0]
+    return { ready: true, baseUrl: tunnelUrl, host: hostOnly, port: '443', tunnelUrl }
+  }
+
+  return { ready: false, baseUrl: '', host: '', port: '', tunnelUrl: null }
 }
 
 function WebhookSection({ camera }: { camera: Camera }) {
   const [copied, setCopied] = useState<string | null>(null)
+  const { ready, baseUrl, host, port, tunnelUrl } = useServerAddress()
+  const isLocalhost = ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
 
   function copy(text: string, key: string) {
     navigator.clipboard.writeText(text).then(() => {
@@ -35,67 +150,78 @@ function WebhookSection({ camera }: { camera: Camera }) {
     })
   }
 
-  const webhookUrl = webhookUrlFor(camera.manufacturer)
-  const isGeneric = camera.manufacturer !== 'hikvision' && camera.manufacturer !== 'intelbras'
-
   return (
-    <div className="mt-6 pt-6 border-t border-border space-y-4">
+    <div className="mt-6 pt-6 border-t border-border space-y-5">
       <div>
-        <p className="text-sm font-semibold text-t1">Configuração de Eventos</p>
+        <p className="text-sm font-semibold text-t1">Configuração de Eventos na Câmera</p>
         <p className="text-xs text-t3 mt-0.5">
-          Configure a câmera para enviar eventos para este endpoint. Não requer autenticação.
+          Copie os campos abaixo e cole nas configurações da câmera. Não requer autenticação.
         </p>
       </div>
 
-      {/* Webhook URL */}
-      <div>
-        <label className="label">URL do Webhook</label>
-        <div className="flex items-center gap-2 mt-1">
-          <code className="flex-1 text-xs font-mono bg-elevated rounded-lg px-3 py-2 text-t1 break-all">
-            {webhookUrl}
-          </code>
-          <button
-            className="btn btn-ghost w-8 h-8 p-0 shrink-0"
-            onClick={() => copy(webhookUrl, 'url')}
-            title="Copiar URL"
-          >
-            {copied === 'url' ? <Check size={14} style={{ color: 'var(--success)' }} /> : <Copy size={14} />}
-          </button>
+      {isLocalhost && !ready && (
+        <div className="rounded-xl p-3 flex items-center gap-3"
+          style={{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)' }}>
+          <svg className="animate-spin shrink-0" width={14} height={14} viewBox="0 0 24 24" fill="none"
+            stroke="currentColor" strokeWidth={2}>
+            <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+          </svg>
+          <p className="text-xs text-t3">Obtendo endereço do servidor…</p>
         </div>
-      </div>
+      )}
 
-      {/* Camera ID */}
-      <div>
-        <label className="label">ID da Câmera <span className="text-t3/60">(incluir no payload)</span></label>
-        <div className="flex items-center gap-2 mt-1">
-          <code className="flex-1 text-xs font-mono bg-elevated rounded-lg px-3 py-2 text-t1">
-            {camera.id}
-          </code>
-          <button
-            className="btn btn-ghost w-8 h-8 p-0 shrink-0"
-            onClick={() => copy(camera.id, 'id')}
-            title="Copiar ID"
-          >
-            {copied === 'id' ? <Check size={14} style={{ color: 'var(--success)' }} /> : <Copy size={14} />}
-          </button>
+      {ready && tunnelUrl && (
+        <div className="rounded-xl p-3 space-y-1"
+          style={{ background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.25)' }}>
+          <p className="text-xs text-green-400 font-medium">Endereço detectado automaticamente</p>
+          <p className="text-[11px] text-t3 break-all">{tunnelUrl}</p>
         </div>
-      </div>
+      )}
 
-      {/* Payload example */}
-      <div>
-        <label className="label">Exemplo de payload</label>
-        <pre
-          className="text-[11px] font-mono rounded-lg p-3 mt-1 overflow-x-auto text-t2 leading-relaxed"
-          style={{ background: 'var(--elevated)' }}
-        >
-          {isGeneric
-            ? `POST ${webhookUrl}\nContent-Type: application/json\n\n{\n  "camera_id": "${camera.id}",\n  "eventType": "motion",\n  "timestamp": "2026-04-10T12:00:00Z"\n}`
-            : camera.manufacturer === 'hikvision'
-              ? `POST ${webhookUrl}\nContent-Type: application/json\n\n{\n  "camera_id": "${camera.id}",\n  "ANPR": {\n    "licensePlate": "ABC1D23",\n    "confidence": 92\n  }\n}`
-              : `POST ${webhookUrl}\nContent-Type: application/json\n\n{\n  "camera_id": "${camera.id}",\n  "plate": "ABC1D23",\n  "confidence": 0.92\n}`
-          }
-        </pre>
-      </div>
+      {ready && camera.manufacturer === 'intelbras' && (
+        <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: 'var(--border)' }}>
+          <p className="text-xs font-semibold text-t2 uppercase tracking-wide">
+            Intelbras — Função Push
+          </p>
+          <CopyField label='Campo "Cliente"' value={`${baseUrl}/intelbras_events`}
+            copyKey="client" copied={copied} onCopy={copy} />
+          <CopyField label='Campo "Nº dispos." — identificador desta câmera' value={camera.id}
+            copyKey="devid" copied={copied} onCopy={copy} />
+          <p className="text-[11px] text-t3 leading-relaxed">
+            Em <strong className="text-t2">Função</strong>, marque <strong className="text-t2">Info Placa</strong>.
+            Em <strong className="text-t2">Informação de upload</strong>, marque <strong className="text-t2">Nº placa</strong> e <strong className="text-t2">Confiabilidade</strong>.
+          </p>
+        </div>
+      )}
+
+      {ready && camera.manufacturer === 'hikvision' && (
+        <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: 'var(--border)' }}>
+          <p className="text-xs font-semibold text-t2 uppercase tracking-wide">
+            Hikvision — Servidor de Alarme
+          </p>
+          <CopyField label="IP de destino / Nome do anfitrião" value={host}
+            copyKey="hik_host" copied={copied} onCopy={copy} />
+          <CopyField label="URL" value={`/hik_pro_connect?camera_id=${camera.id}`}
+            copyKey="hik_url" copied={copied} onCopy={copy} />
+          <div className="grid grid-cols-2 gap-3">
+            <CopyField label="Porta N.º" value={port}
+              copyKey="hik_port" copied={copied} onCopy={copy} />
+            <div>
+              <label className="label">Tipo de protocolo</label>
+              <p className="text-xs text-t1 mt-1 px-3 py-2 rounded-lg"
+                style={{ background: 'var(--elevated)' }}>HTTP</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {ready && camera.manufacturer !== 'hikvision' && camera.manufacturer !== 'intelbras' && (
+        <div className="rounded-xl border p-4 space-y-3" style={{ borderColor: 'var(--border)' }}>
+          <p className="text-xs font-semibold text-t2 uppercase tracking-wide">Endpoint genérico</p>
+          <CopyField label="URL completa" value={`${baseUrl}/camera_events?camera_id=${camera.id}`}
+            copyKey="gen_url" copied={copied} onCopy={copy} />
+        </div>
+      )}
     </div>
   )
 }
@@ -120,10 +246,12 @@ export function CameraDetailPage() {
   const [loading, setLoading]     = useState(true)
   const [editing, setEditing]     = useState(false)
   const [editForm, setEditForm]   = useState<Partial<Camera>>({})
-  const [snapshotOpen, setSnapshotOpen] = useState(false)
-  const [snapshotUrl, setSnapshotUrl]   = useState('')
+  const [snapshotOpen, setSnapshotOpen]       = useState(false)
+  const [snapshotUrl, setSnapshotUrl]         = useState('')
   const [snapshotLoading, setSnapshotLoading] = useState(false)
+  const [snapshotError, setSnapshotError]     = useState(false)
 
+  // ── Camera + stream loading ───────────────────────────────────────────────
   useEffect(() => {
     if (!id) return
     Promise.all([
@@ -162,6 +290,8 @@ export function CameraDetailPage() {
 
   const openSnapshot = async () => {
     if (!id) return
+    setSnapshotUrl('')
+    setSnapshotError(false)
     setSnapshotLoading(true)
     setSnapshotOpen(true)
     try {
@@ -169,15 +299,19 @@ export function CameraDetailPage() {
       if (url) {
         setSnapshotUrl(url)
       } else {
-        toast.error('Snapshot indisponível')
-        setSnapshotOpen(false)
+        setSnapshotError(true)
       }
     } catch {
-      toast.error('Erro ao capturar snapshot')
-      setSnapshotOpen(false)
+      setSnapshotError(true)
     } finally {
       setSnapshotLoading(false)
     }
+  }
+
+  const closeSnapshot = () => {
+    setSnapshotOpen(false)
+    setSnapshotUrl('')
+    setSnapshotError(false)
   }
 
   if (loading) return <PageSpinner />
@@ -197,7 +331,7 @@ export function CameraDetailPage() {
               {camera.is_online ? 'Online' : 'Offline'}
             </Badge>
           </div>
-          <p className="text-xs text-t3 truncate">{camera.location ?? '—'}</p>
+          <p className="text-xs text-t3 truncate">{parseLocation(camera.location).label}</p>
         </div>
       </div>
 
@@ -223,60 +357,93 @@ export function CameraDetailPage() {
 
       {/* Live */}
       {tab === 'live' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          <div className="lg:col-span-2">
-            <VideoPlayer
-              src={streamUrl || undefined}
-              name={camera.name}
-              offline={!camera.is_online}
-              className="aspect-video w-full"
-              autoPlay
-            />
-            <p className="text-[10px] text-t3/60 text-center mt-1">
-              Para ver gravações, abra a página <strong className="text-t2">Gravações</strong> na sidebar.
-            </p>
-          </div>
-
-          {/* Side panel */}
-          <div className="space-y-3">
-            <div className="card p-4 space-y-3">
-              <p className="text-xs font-semibold text-t2 uppercase tracking-wide">Status</p>
-              <div className="space-y-2">
-                {[
-                  { label: 'Protocolo',  value: camera.stream_protocol.replace('_', ' ').toUpperCase() },
-                  { label: 'Fabricante', value: camera.manufacturer },
-                  { label: 'Retenção',   value: `${camera.retention_days} dias` },
-                  { label: 'Última vez', value: camera.last_seen_at ? format(new Date(camera.last_seen_at), 'dd/MM HH:mm') : '—' },
-                ].map(({ label, value }) => (
-                  <div key={label} className="flex justify-between">
-                    <span className="text-xs text-t3">{label}</span>
-                    <span className="text-xs text-t1 font-medium">{value}</span>
-                  </div>
-                ))}
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
+            {/* Player */}
+            <div className="lg:col-span-2 space-y-2">
+              {/* Live badge */}
+              <div className="flex items-center gap-2">
+                <span
+                  className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold"
+                  style={{ background: 'rgba(239,68,68,0.12)', color: '#ef4444' }}
+                >
+                  <Radio size={11} className="animate-pulse" />
+                  AO VIVO
+                </span>
               </div>
+
+              <VideoPlayer
+                src={streamUrl || undefined}
+                name={camera.name}
+                offline={!camera.is_online}
+                className="aspect-video w-full"
+                autoPlay
+              />
             </div>
-            <button className="btn btn-ghost w-full gap-2" onClick={openSnapshot}>
-              <CameraIcon size={15} />Snapshot
-            </button>
+
+            {/* Side panel */}
+            <div className="space-y-3">
+              <div className="card p-4 space-y-3">
+                <p className="text-xs font-semibold text-t2 uppercase tracking-wide">Status</p>
+                <div className="space-y-2">
+                  {[
+                    { label: 'Protocolo',  value: camera.stream_protocol.replace('_', ' ').toUpperCase() },
+                    { label: 'Fabricante', value: camera.manufacturer },
+                    { label: 'Retenção',   value: `${camera.retention_days} dias` },
+                    { label: 'Última vez', value: camera.last_seen_at ? new Date(camera.last_seen_at).toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' }) : '—' },
+                  ].map(({ label, value }) => (
+                    <div key={label} className="flex justify-between">
+                      <span className="text-xs text-t3">{label}</span>
+                      <span className="text-xs text-t1 font-medium">{value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <button className="btn btn-ghost w-full gap-2" onClick={openSnapshot}>
+                <CameraIcon size={15} />Snapshot
+              </button>
+            </div>
           </div>
         </div>
       )}
 
       {/* Snapshot modal */}
-      <Modal open={snapshotOpen} onClose={() => setSnapshotOpen(false)} title="Snapshot" size="lg">
-        <div className="flex items-center justify-center min-h-[200px]">
-          {snapshotLoading ? (
-            <div className="text-t3 text-sm">Capturando snapshot…</div>
-          ) : snapshotUrl ? (
-            <img
-              src={snapshotUrl}
-              alt="Snapshot"
-              className="w-full h-auto rounded-lg object-contain"
-            />
-          ) : (
-            <div className="text-t3 text-sm">Snapshot indisponível</div>
-          )}
-        </div>
+      <Modal
+        open={snapshotOpen}
+        onClose={closeSnapshot}
+        title={`Snapshot — ${camera.name}`}
+        size="xl"
+        footer={snapshotUrl && !snapshotError ? (
+          <a
+            href={snapshotUrl}
+            download={`snapshot_${camera.name.replace(/\s+/g, '_')}_${new Date().toISOString().split('T')[0]}.jpg`}
+            className="btn btn-primary gap-2 text-sm"
+          >
+            <Download size={14} />Salvar imagem
+          </a>
+        ) : undefined}
+      >
+        {snapshotLoading ? (
+          <div className="flex items-center justify-center py-10 gap-3 text-t3">
+            <div className="w-5 h-5 border-2 border-t-accent rounded-full animate-spin" />
+            <span className="text-sm">Capturando snapshot…</span>
+          </div>
+        ) : snapshotError ? (
+          <div className="flex flex-col items-center justify-center py-10 gap-3 text-t3">
+            <CameraIcon size={36} className="text-t3/30" />
+            <p className="text-sm font-medium">Snapshot indisponível</p>
+            <p className="text-xs text-t3/60 text-center max-w-xs">
+              A câmera pode estar offline ou não suportar captura de snapshot.
+            </p>
+          </div>
+        ) : snapshotUrl ? (
+          <img
+            src={snapshotUrl}
+            alt="Snapshot"
+            className="w-full h-auto rounded-lg object-contain"
+            onError={() => setSnapshotError(true)}
+          />
+        ) : null}
       </Modal>
 
       {/* Info */}
@@ -302,13 +469,30 @@ export function CameraDetailPage() {
           </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            {[
-              { label: 'Nome',            field: 'name',           type: 'text' },
-              { label: 'Localização',     field: 'location',       type: 'text' },
-              { label: 'Fabricante',      field: 'manufacturer',   type: 'text' },
-              { label: 'Retenção (dias)', field: 'retention_days', type: 'number' },
-              { label: 'URL RTSP',        field: 'rtsp_url',       type: 'text' },
-            ].map(({ label, field, type }) => (
+            {(
+              [
+                { label: 'Nome',            field: 'name',           type: 'text' },
+                {
+                  label: 'Localização', field: 'location', type: 'text',
+                  viewRender: () => {
+                    const { label, href } = parseLocation(camera.location)
+                    if (!href) return <p className="text-sm text-t1 mt-1">{label}</p>
+                    return (
+                      <a href={href} target="_blank" rel="noopener noreferrer"
+                         className="flex items-center gap-1 text-sm text-accent hover:underline mt-1 w-fit">
+                        {label}<ExternalLink size={12} />
+                      </a>
+                    )
+                  },
+                },
+                { label: 'Fabricante',      field: 'manufacturer',   type: 'text' },
+                { label: 'Retenção (dias)', field: 'retention_days', type: 'number' },
+                {
+                  label: 'URL RTSP', field: 'rtsp_url', type: 'text',
+                  viewRender: () => <RtspField url={camera.rtsp_url} />,
+                },
+              ] as { label: string; field: string; type: string; viewRender?: () => React.ReactNode }[]
+            ).map(({ label, field, type, viewRender }) => (
               <div key={field}>
                 <label className="label">{label}</label>
                 {editing ? (
@@ -321,14 +505,13 @@ export function CameraDetailPage() {
                       [field]: type === 'number' ? Number(e.target.value) : e.target.value,
                     }))}
                   />
-                ) : (
+                ) : viewRender ? viewRender() : (
                   <p className="text-sm text-t1 mt-1">{(camera as unknown as Record<string, unknown>)[field] as string ?? '—'}</p>
                 )}
               </div>
             ))}
           </div>
 
-          {/* Webhook URLs */}
           <WebhookSection camera={camera} />
         </div>
       )}

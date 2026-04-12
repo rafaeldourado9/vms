@@ -1,9 +1,9 @@
 import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
-  LayoutDashboard, Cctv, LayoutGrid, MapPin, Film,
+  LayoutDashboard, Cctv, LayoutGrid, Film,
   ShieldAlert, Bell, Users, Settings,
-  ChevronLeft, ChevronRight, LogOut,
+  ChevronLeft, ChevronRight, LogOut, Brain,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAuthStore } from '@/store/authStore'
@@ -22,9 +22,9 @@ const NAV_ITEMS: NavItem[] = [
   { to: '/dashboard',      icon: LayoutDashboard, label: 'Dashboard' },
   { to: '/cameras',        icon: Cctv,            label: 'Câmeras' },
   { to: '/mosaic',         icon: LayoutGrid,      label: 'Mosaico' },
-  { to: '/map',            icon: MapPin,          label: 'Mapa Tático' },
   { to: '/recordings',     icon: Film,            label: 'Gravações' },
   { to: '/events',         icon: ShieldAlert,     label: 'Eventos' },
+  { to: '/analytics',      icon: Brain,           label: 'Analytics',     adminOnly: true },
   { to: '/notifications',  icon: Bell,            label: 'Notificações' },
   { to: '/users',          icon: Users,           label: 'Usuários',      adminOnly: true },
   { to: '/settings',       icon: Settings,        label: 'Configurações', adminOnly: true },

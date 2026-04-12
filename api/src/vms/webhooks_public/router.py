@@ -217,7 +217,8 @@ async def _resolve_camera(
             return result
 
     # 2. Campo direto no body
-    for key in ("camera_id", "cameraId", "deviceId", "device_id"):
+    # DeviceID = Intelbras "Nº dispos." (campo enviado no body do push)
+    for key in ("camera_id", "cameraId", "DeviceID", "deviceId", "device_id", "deviceSerial", "serialNo"):
         cam_id = body.get(key)
         if cam_id and isinstance(cam_id, str):
             result = await _lookup_by_id(str(cam_id))

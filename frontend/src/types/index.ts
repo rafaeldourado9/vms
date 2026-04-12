@@ -122,6 +122,7 @@ export interface RecordingSegment {
   duration_seconds: number
   file_size_bytes: number
   created_at: string
+  event_type?: 'continuous' | 'motion' | 'event'
 }
 
 export interface TimelineHour {

@@ -28,6 +28,21 @@ class PublishAuthResponse(BaseModel):
     ok: bool
 
 
+class AnalyticsAuthRequest(BaseModel):
+    """
+    Payload de autenticação para analytics service.
+    
+    MediaMTX chama este endpoint quando o analytics tenta ler um stream.
+    Apenas verifica se o path existe e a câmera está online — sem validar token.
+    """
+
+    action: str
+    path: str
+    query: str = ""
+    # Headers adicionais que identificam o cliente
+    x_analytics_service: str = ""
+
+
 class StreamSessionResponse(BaseModel):
     """Resposta com dados de uma sessão de streaming."""
 

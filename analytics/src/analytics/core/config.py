@@ -24,6 +24,7 @@ class Settings(BaseSettings):
 
     # ─── MediaMTX ──────────────────────────────────────────────────────────
     mediamtx_api_url: str = Field(default="http://localhost:9997")
+    mediamtx_rtsp_port: int = Field(default=8554, description="Porta RTSP do MediaMTX")
 
     # ─── Analytics ─────────────────────────────────────────────────────────
     analytics_fps: int = Field(default=1, description="Frames por segundo por câmera")
@@ -32,8 +33,8 @@ class Settings(BaseSettings):
     yolo_conf: float = Field(default=0.30, description="Confiança mínima YOLO")
 
     # Modelos YOLO
-    yolo_model_path: str = Field(default="/models/yolov8n.pt")
-    lpr_model_path: str = Field(default="/models/yolov8n-plate.pt")
+    yolo_model_path: str = Field(default="/models/object.pt")
+    lpr_model_path: str = Field(default="/models/object.pt")
     fire_smoke_model_path: str = Field(default="/models/fire.pt")
     ppe_model_path: str = Field(default="/models/ppe.pt")
     biker_model_path: str = Field(default="/models/biker_2.pt")

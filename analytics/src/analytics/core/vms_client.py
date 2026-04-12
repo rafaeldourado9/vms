@@ -80,6 +80,23 @@ class VMSClient:
             logger.exception("Erro ao obter stream token para câmera %s", camera_id)
             return None
 
+    async def list_rois(self, camera_id: str | None = None) -> list[dict[str, Any]]:
+        """
+        Busca ROIs configuradas via GET /api/v1/plugins/rois.
+
+        Retorna lista de dicts com id, name, camera_id, plugin_id, polygon_points, config.
+        """
+        if not self._client:
+            return []
+        try:
+            params = {"camera_id": camera_id} if camera_id else {}
+            resp = await self._client.get("/api/v1/plugins/rois", params=params)
+            resp.raise_for_status()
+            return resp.json()  # type: ignore[no-any-return]
+        except httpx.HTTPError:
+            logger.exception("Erro ao buscar ROIs para câmera %s", camera_id)
+            return []
+
     async def ingest_event(
         self,
         camera_id: str,
