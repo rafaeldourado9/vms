@@ -217,6 +217,7 @@ def _include_routers(app: FastAPI) -> None:
     from vms.vod.router import router as vod_router
     from vms.audit.router import router as audit_router
     from vms.reports.router import router as reports_router
+    from vms.billing.router import router as billing_router
 
     # Health — sem prefixo /api/v1
     app.include_router(health_router)
@@ -254,6 +255,9 @@ def _include_routers(app: FastAPI) -> None:
 
     # Audit — audit trail
     app.include_router(audit_router, prefix="/api/v1")
+
+    # Billing — faturamento e licenças
+    app.include_router(billing_router, prefix="/api/v1")
 
 
 app = create_app()
