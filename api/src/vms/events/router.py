@@ -189,8 +189,8 @@ async def mediamtx_on_not_ready(body: MediaMTXOnNotReadyPayload, db: DbSession) 
     summary="Webhook MediaMTX — segmento de gravação pronto",
     tags=["webhooks"],
 )
-async def mediamtx_segment_ready(body: MediaMTXSegmentPayload, db: DbSession) -> dict:
-    """Indexa segmento de gravação e publica evento no bus."""
+async def mediamtx_segment_ready(body: MediaMTXSegmentPayload, db: DbSession, request: Request) -> dict:
+    """Indexa segmento de gravação e enqueues task batch para analytics."""
     ids = _parse_mediamtx_path(body.path) or await _resolve_live_path(body.path, db)
     if not ids:
         logger.warning("Path MediaMTX inválido em segment_ready: %s", body.path)
@@ -204,16 +204,34 @@ async def mediamtx_segment_ready(body: MediaMTXSegmentPayload, db: DbSession) ->
     from vms.recordings.service import RecordingService
     svc = RecordingService(RecordingSegmentRepository(db), ClipRepository(db))
     try:
-        await svc.index_segment(
+        segment = await svc.index_segment(
             tenant_id=tenant_id,
             camera_id=camera_id,
             file_path=body.segment_path,
             mediamtx_path=body.path,
         )
+
+        # Enqueue ARQ task para processamento batch com plugins de IA
+        try:
+            redis = request.app.state.arq_redis
+            await redis.enqueue_job(
+                "task_batch_process_segment",
+                segment_id=segment.id,
+                file_path=body.segment_path,
+                camera_id=camera_id,
+                tenant_id=tenant_id,
+            )
+        except Exception:
+            logger.debug(
+                "Falha ao enqueue batch task para segmento %s (não crítico)",
+                segment.id,
+                exc_info=True,
+            )
+
     except Exception:
         logger.exception("Erro ao indexar segmento: %s", body.segment_path)
 
-    from vms.core.event_bus import publish_event
+    from vms.infrastructure.messaging.event_bus import publish_event
     await publish_event(
         "recording.segment_ready",
         {"camera_id": camera_id, "path": body.path, "segment_path": body.segment_path},

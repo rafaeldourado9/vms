@@ -118,6 +118,10 @@ class RecordingSegment:
     duration_seconds: float
     size_bytes: int
     sha256_hash: Sha256Hash | None = None
+    # Analytics batch processing flags
+    analytics_processed: bool = False
+    analytics_plugins_processed: list[str] = field(default_factory=list)
+    analytics_processed_at: datetime | None = None
 
     @classmethod
     def from_file_path(
@@ -215,6 +219,18 @@ class RecordingSegment:
         """Verifica se segmento cobre um determinado timestamp."""
         ts = timestamp if timestamp.tzinfo else timestamp.replace(tzinfo=timezone.utc)
         return self.started_at <= ts <= self.ended_at
+
+    def mark_processed(self, plugin_name: str) -> None:
+        """Marca segmento como processado por um plugin específico."""
+        from vms.shared.clock import clock
+        self.analytics_processed = True
+        if plugin_name not in self.analytics_plugins_processed:
+            self.analytics_plugins_processed.append(plugin_name)
+        self.analytics_processed_at = clock.now()
+
+    def is_processed_for(self, plugin_name: str) -> bool:
+        """Verifica se segmento já foi processado por um plugin específico."""
+        return plugin_name in self.analytics_plugins_processed
 
 
 @dataclass
