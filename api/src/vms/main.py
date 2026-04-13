@@ -180,6 +180,10 @@ def create_app() -> FastAPI:
     from vms.infrastructure.middleware.correlation_id import CorrelationIdMiddleware
     app.add_middleware(CorrelationIdMiddleware)
 
+    # Require onboarding — bloqueia tenant sem plano escolhido
+    from vms.infrastructure.middleware.require_onboarding import RequireOnboardingMiddleware
+    app.add_middleware(RequireOnboardingMiddleware)
+
     # Handlers de exceção de domínio
     register_exception_handlers(app)
 
@@ -217,7 +221,7 @@ def _include_routers(app: FastAPI) -> None:
     from vms.vod.router import router as vod_router
     from vms.audit.router import router as audit_router
     from vms.reports.router import router as reports_router
-    from vms.billing.router import router as billing_router
+    from vms.billing.router import router as billing_router, license_router
     from vms.lgpd.router import router as lgpd_router
 
     # Health — sem prefixo /api/v1
@@ -259,6 +263,7 @@ def _include_routers(app: FastAPI) -> None:
 
     # Billing — faturamento e licenças
     app.include_router(billing_router, prefix="/api/v1")
+    app.include_router(license_router, prefix="/api/v1")
 
     # LGPD — compliance e proteção de dados
     app.include_router(lgpd_router, prefix="/api/v1")

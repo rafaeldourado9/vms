@@ -31,14 +31,12 @@ class TenantModel(Base):
         DateTime(timezone=True), server_default=func.now()
     )
     
-    # Billing fields (Sprint 13)
-    billing_plan_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
-    subscription_status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="active")
+    # Billing fields (Sprint 13 — whitelabel license key)
+    license_key_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    onboarding_complete: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    subscription_status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
     subscription_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    subscription_expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     current_usage_cameras: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
-    current_usage_storage_bytes: Mapped[int] = mapped_column(BigInteger, nullable=False, server_default="0")
-    current_monthly_events: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
 
     users: Mapped[list["UserModel"]] = relationship("UserModel", back_populates="tenant")
 

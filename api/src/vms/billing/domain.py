@@ -1,121 +1,61 @@
-"""Entidades de domínio de faturamento — Licenciamento por recurso."""
+"""Licença de ativação do VMS — sistema whitelabel.
+
+Não é SaaS. Cada cliente tem UMA licença (serial key) que ativa a instalação.
+A licença pode ser validada online ou offline (com grace period).
+"""
 from __future__ import annotations
 
+import hashlib
+import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from enum import StrEnum
-from typing import Any
-
-from vms.shared.events import DomainEvent
-from vms.shared.kernel import AuditId, BillingId, EntityId, TenantId
-
-
-class LicenseType(StrEnum):
-    """Tipos de licença disponíveis."""
-
-    CAMERA_ONLY = "camera_only"              # Só gravação/streaming
-    CAMERA_STORAGE = "camera_storage"        # Câmera + storage adicional
-    CAMERA_ANALYTICS = "camera_analytics"    # Câmera + storage + IA/analytics
 
 
 class LicenseStatus(StrEnum):
-    """Estado de uma licença."""
-
     ACTIVE = "active"
     EXPIRED = "expired"
     REVOKED = "revoked"
-
-
-@dataclass(frozen=True)
-class LicenseCreated(DomainEvent):
-    """Evento: licença criada para câmera."""
-    license_id: BillingId | None = None
-    tenant_id: TenantId | None = None
-    camera_id: str | None = None
-    license_type: str = ""
-
-
-@dataclass(frozen=True)
-class LicenseExpired(DomainEvent):
-    """Evento: licença expirou."""
-    license_id: BillingId | None = None
-    tenant_id: TenantId | None = None
-    camera_id: str | None = None
+    TRIAL = "trial"
 
 
 @dataclass
-class License:
-    """
-    Licença de uso por câmera.
+class VmsLicense:
+    """Licença de ativação do VMS."""
 
-    Modelo de negócio:
-    - Cada câmera precisa de uma licença ativa para funcionar
-    - CAMERA_ONLY: gravação e streaming básico
-    - CAMERA_STORAGE: câmera + storage adicional configurável
-    - CAMERA_ANALYTICS: câmera + storage + IA/analytics
-
-    Sem licença ativa → câmera não grava, não faz analytics.
-    """
-
-    id: BillingId
-    tenant_id: TenantId
-    camera_id: str | None = None  # NULL = licença avulsa (para ativar depois)
-    license_type: LicenseType = LicenseType.CAMERA_ONLY
+    license_key: str              # Serial: VMS-XXXX-XXXX-XXXX-XXXX
+    tenant_id: str
     status: LicenseStatus = LicenseStatus.ACTIVE
-    storage_limit_gb: int | None = None
-    analytics_enabled: bool = False
-    activated_at: datetime = field(default_factory=datetime.utcnow)
+    max_cameras: int = 0          # 0 = ilimitado
+    max_ai_cameras: int = 0       # 0 = sem IA
     expires_at: datetime | None = None
-    created_at: datetime = field(default_factory=datetime.utcnow)
+    activated_at: datetime | None = None
+    hardware_id: str | None = None   # fingerprint da máquina
+    customer_name: str = ""
+    customer_email: str = ""
 
     @property
-    def is_active(self) -> bool:
-        """Verifica se licença está ativo e não expirado. Auto-expira se necessário."""
-        if self.status != LicenseStatus.ACTIVE:
+    def is_valid(self) -> bool:
+        if self.status in (LicenseStatus.EXPIRED, LicenseStatus.REVOKED):
             return False
-        if self.expires_at and datetime.utcnow() > self.expires_at:
-            return False  # Chamador deve chamar expire_if_past() para persistir
+        if self.expires_at and datetime.now(timezone.utc) > self.expires_at:
+            return False
         return True
 
-    def expire_if_past(self) -> bool:
-        """
-        Verifica se expirou e atualiza status localmente.
-        Retorna True se status foi alterado para EXPIRED.
-        """
-        if self.status == LicenseStatus.ACTIVE and self.expires_at and datetime.utcnow() > self.expires_at:
-            self.status = LicenseStatus.EXPIRED
-            self.record_event(LicenseExpired(
-                license_id=self.id,
-                tenant_id=self.tenant_id,
-                camera_id=self.camera_id,
-            ))
-            return True
-        return False
+    @classmethod
+    def generate_key(cls) -> str:
+        """Gera uma license key no formato VMS-XXXX-XXXX-XXXX-XXXX."""
+        raw = uuid.uuid4().hex[:16].upper()
+        parts = [raw[i:i+4] for i in range(0, 16, 4)]
+        return f"VMS-{'-'.join(parts)}"
 
-    @property
-    def has_analytics(self) -> bool:
-        """Verifica se inclui analytics."""
-        return self.license_type == LicenseType.CAMERA_ANALYTICS and self.analytics_enabled
+    @classmethod
+    def verify_key_format(cls, key: str) -> bool:
+        """Verifica se a key tem o formato válido."""
+        import re
+        return bool(re.match(r'^VMS-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}-[A-F0-9]{4}$', key))
 
-    @property
-    def has_extra_storage(self) -> bool:
-        """Verifica se inclui storage adicional."""
-        return (
-            self.license_type in (LicenseType.CAMERA_STORAGE, LicenseType.CAMERA_ANALYTICS)
-            and self.storage_limit_gb is not None
-        )
-
-
-@dataclass
-class LicenseValidation:
-    """Resultado da validação de licença."""
-
-    is_valid: bool
-    license: License | None = None
-    reason: str = ""
-
-    @property
-    def error_message(self) -> str:
-        if self.is_valid:
-            return ""
-        return f"Licença inválida: {self.reason}"
+    def fingerprint(self) -> str:
+        """Hash único da licença para verificação de integridade."""
+        raw = f"{self.license_key}:{self.tenant_id}:{self.hardware_id}:{self.customer_email}"
+        return hashlib.sha256(raw.encode()).hexdigest()[:16].upper()
