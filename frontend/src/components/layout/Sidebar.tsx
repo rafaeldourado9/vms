@@ -3,13 +3,19 @@ import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Cctv, LayoutGrid, Film,
   ShieldAlert, Bell, Users, Settings,
-  ChevronLeft, ChevronRight, LogOut, Brain,
+  ChevronLeft, ChevronRight, LogOut, Scan, MapPin,
+  FileText, ClipboardList, ShieldCheck, HeartPulse, BarChart3,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAuthStore } from '@/store/authStore'
 import { useThemeStore } from '@/store/themeStore'
 import { usePermission } from '@/hooks/usePermission'
 import toast from 'react-hot-toast'
+
+interface NavSection {
+  label: string
+  items: NavItem[]
+}
 
 interface NavItem {
   to: string
@@ -18,16 +24,42 @@ interface NavItem {
   adminOnly?: boolean
 }
 
-const NAV_ITEMS: NavItem[] = [
-  { to: '/dashboard',      icon: LayoutDashboard, label: 'Dashboard' },
-  { to: '/cameras',        icon: Cctv,            label: 'Câmeras' },
-  { to: '/mosaic',         icon: LayoutGrid,      label: 'Mosaico' },
-  { to: '/recordings',     icon: Film,            label: 'Gravações' },
-  { to: '/events',         icon: ShieldAlert,     label: 'Eventos' },
-  { to: '/analytics',      icon: Brain,           label: 'Analytics',     adminOnly: true },
-  { to: '/notifications',  icon: Bell,            label: 'Notificações' },
-  { to: '/users',          icon: Users,           label: 'Usuários',      adminOnly: true },
-  { to: '/settings',       icon: Settings,        label: 'Configurações', adminOnly: true },
+const NAV_SECTIONS: NavSection[] = [
+  {
+    label: 'Operações',
+    items: [
+      { to: '/dashboard',      icon: LayoutDashboard, label: 'Dashboard' },
+      { to: '/cameras',        icon: Cctv,            label: 'Câmeras' },
+      { to: '/mosaic',         icon: LayoutGrid,      label: 'Mosaico' },
+      { to: '/tactical',       icon: MapPin,          label: 'Visão Tática' },
+      { to: '/recordings',     icon: Film,            label: 'Gravações' },
+      { to: '/events',         icon: ShieldAlert,     label: 'Eventos' },
+    ],
+  },
+  {
+    label: 'Inteligência',
+    items: [
+      { to: '/analytics',      icon: Scan,            label: 'Regiões (ROI)', adminOnly: true },
+    ],
+  },
+  {
+    label: 'Administração',
+    items: [
+      { to: '/reports',        icon: FileText,        label: 'Relatórios' },
+      { to: '/audit',          icon: ClipboardList,   label: 'Auditoria' },
+      { to: '/billing',        icon: BarChart3,       label: 'Licenças' },
+      { to: '/notifications',  icon: Bell,            label: 'Notificações' },
+      { to: '/users',          icon: Users,           label: 'Usuários',      adminOnly: true },
+    ],
+  },
+  {
+    label: 'Sistema',
+    items: [
+      { to: '/lgpd',           icon: ShieldCheck,     label: 'LGPD' },
+      { to: '/health',         icon: HeartPulse,      label: 'Saúde' },
+      { to: '/settings',       icon: Settings,        label: 'Configurações', adminOnly: true },
+    ],
+  },
 ]
 
 export function Sidebar() {
@@ -43,7 +75,12 @@ export function Sidebar() {
     toast.success('Sessão encerrada')
   }
 
-  const visibleItems = NAV_ITEMS.filter((item) => !item.adminOnly || isAdmin)
+  const visibleSections = NAV_SECTIONS
+    .map((section) => ({
+      ...section,
+      items: section.items.filter((item) => !item.adminOnly || isAdmin),
+    }))
+    .filter((section) => section.items.length > 0)
 
   return (
     <aside
@@ -87,29 +124,40 @@ export function Sidebar() {
       </div>
 
       {/* Nav */}
-      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-0.5">
-        {visibleItems.map(({ to, icon: Icon, label }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === '/dashboard'}
-            title={collapsed ? label : undefined}
-            className={({ isActive }) =>
-              clsx(
-                'flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-100',
-                collapsed ? 'justify-center' : '',
-                isActive
-                  ? 'text-white'
-                  : 'text-t2 hover:text-t1 hover:bg-elevated',
-              )
-            }
-            style={({ isActive }) =>
-              isActive ? { background: 'var(--accent)', color: '#fff' } : {}
-            }
-          >
-            <Icon size={18} className="shrink-0" />
-            {!collapsed && <span className="truncate">{label}</span>}
-          </NavLink>
+      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-3">
+        {visibleSections.map((section) => (
+          <div key={section.label}>
+            {!collapsed && (
+              <p className="text-[10px] font-semibold text-t3 uppercase tracking-wider px-2.5 mb-1">
+                {section.label}
+              </p>
+            )}
+            <div className="space-y-0.5">
+              {section.items.map(({ to, icon: Icon, label }) => (
+                <NavLink
+                  key={to}
+                  to={to}
+                  end={to === '/dashboard'}
+                  title={collapsed ? label : undefined}
+                  className={({ isActive }) =>
+                    clsx(
+                      'flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-100',
+                      collapsed ? 'justify-center' : '',
+                      isActive
+                        ? 'text-white'
+                        : 'text-t2 hover:text-t1 hover:bg-elevated',
+                    )
+                  }
+                  style={({ isActive }) =>
+                    isActive ? { background: 'var(--accent)', color: '#fff' } : {}
+                  }
+                >
+                  <Icon size={18} className="shrink-0" />
+                  {!collapsed && <span className="truncate">{label}</span>}
+                </NavLink>
+              ))}
+            </div>
+          </div>
         ))}
       </nav>
 

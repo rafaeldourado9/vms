@@ -15,8 +15,13 @@ import { EventsPage }          from '@/pages/EventsPage'
 import { NotificationsPage }   from '@/pages/NotificationsPage'
 import { UsersPage }           from '@/pages/UsersPage'
 import { SettingsPage }        from '@/pages/SettingsPage'
-import { AnalyticsCatalog }    from '@/pages/AnalyticsCatalog'
-import { AnalyticsEvents }     from '@/pages/AnalyticsEvents'
+import { ROIManagementPage }    from '@/pages/ROIManagementPage'
+import { TacticalViewPage }    from '@/pages/TacticalViewPage'
+import { ReportsPage }         from '@/pages/ReportsPage'
+import { AuditPage }           from '@/pages/AuditPage'
+import { BillingPage }         from '@/pages/BillingPage'
+import { LGPDPage }            from '@/pages/LGPDPage'
+import { SystemHealthPage }    from '@/pages/SystemHealthPage'
 
 // ─── Proteções de segurança no frontend ───────────────────────────────────────
 
@@ -56,11 +61,16 @@ function AuthenticatedApp() {
         <Route path="/cameras"       element={<CamerasPage />} />
         <Route path="/cameras/:id"   element={<CameraDetailPage />} />
         <Route path="/mosaic"        element={<MosaicPage />} />
+        <Route path="/tactical"      element={<TacticalViewPage />} />
         <Route path="/recordings"    element={<RecordingsPage />} />
         <Route path="/events"        element={<EventsPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
-        <Route path="/analytics"     element={<AnalyticsCatalog />} />
-        <Route path="/analytics/events" element={<AnalyticsEvents />} />
+        <Route path="/analytics"     element={<ROIManagementPage />} />
+        <Route path="/reports"       element={<ReportsPage />} />
+        <Route path="/audit"         element={<AuditPage />} />
+        <Route path="/billing"       element={<BillingPage />} />
+        <Route path="/lgpd"          element={<LGPDPage />} />
+        <Route path="/health"        element={<SystemHealthPage />} />
         <Route path="/users"         element={<UsersPage />} />
         <Route path="/settings"      element={<SettingsPage />} />
         <Route path="*"              element={<Navigate to="/dashboard" replace />} />
