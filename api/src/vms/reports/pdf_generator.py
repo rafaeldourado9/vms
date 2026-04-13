@@ -29,18 +29,25 @@ def render_template(template_name: str, context: dict) -> str:
     )
 
 
-def generate_pdf(html_content: str) -> bytes:
+def generate_pdf(html_content: str, css_path: str | None = None) -> bytes:
     """
     Gera PDF a partir de HTML string usando WeasyPrint.
 
     Args:
-        html_content: HTML completo com CSS embutido
+        html_content: HTML completo
+        css_path: Caminho opcional para arquivo CSS externo
 
     Returns:
         Bytes do PDF gerado
     """
     try:
-        pdf_bytes = HTML(string=html_content).write_pdf()
+        if css_path:
+            from weasyprint import CSS
+            pdf_bytes = HTML(string=html_content).write_pdf(
+                stylesheets=[CSS(filename=css_path)]
+            )
+        else:
+            pdf_bytes = HTML(string=html_content).write_pdf()
         return pdf_bytes
     except Exception as exc:
         logger.exception("Falha ao gerar PDF com WeasyPrint: %s", exc)

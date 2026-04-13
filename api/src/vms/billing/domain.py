@@ -70,12 +70,27 @@ class License:
 
     @property
     def is_active(self) -> bool:
-        """Verifica se licença está ativo e não expirado."""
+        """Verifica se licença está ativo e não expirado. Auto-expira se necessário."""
         if self.status != LicenseStatus.ACTIVE:
             return False
         if self.expires_at and datetime.utcnow() > self.expires_at:
-            return False
+            return False  # Chamador deve chamar expire_if_past() para persistir
         return True
+
+    def expire_if_past(self) -> bool:
+        """
+        Verifica se expirou e atualiza status localmente.
+        Retorna True se status foi alterado para EXPIRED.
+        """
+        if self.status == LicenseStatus.ACTIVE and self.expires_at and datetime.utcnow() > self.expires_at:
+            self.status = LicenseStatus.EXPIRED
+            self.record_event(LicenseExpired(
+                license_id=self.id,
+                tenant_id=self.tenant_id,
+                camera_id=self.camera_id,
+            ))
+            return True
+        return False
 
     @property
     def has_analytics(self) -> bool:

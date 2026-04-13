@@ -87,7 +87,18 @@ class ISAPIClient:
     async def get(self, path: str) -> Any:
         """GET XML ou JSON."""
         response = await self._request("GET", path)
-        # Tenta parsear como JSON, senão retorna texto
+        content_type = response.headers.get("content-type", "").lower()
+
+        # Se XML (Hikvision retorna application/xml ou text/xml)
+        if "xml" in content_type:
+            try:
+                import xmltodict
+                return xmltodict.parse(response.text)
+            except Exception:
+                logger.warning("Falha ao parsear XML ISAPI, retornando texto puro")
+                return response.text
+
+        # Tenta JSON
         try:
             return response.json()
         except Exception:

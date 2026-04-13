@@ -218,6 +218,7 @@ def _include_routers(app: FastAPI) -> None:
     from vms.audit.router import router as audit_router
     from vms.reports.router import router as reports_router
     from vms.billing.router import router as billing_router
+    from vms.lgpd.router import router as lgpd_router
 
     # Health — sem prefixo /api/v1
     app.include_router(health_router)
@@ -258,6 +259,9 @@ def _include_routers(app: FastAPI) -> None:
 
     # Billing — faturamento e licenças
     app.include_router(billing_router, prefix="/api/v1")
+
+    # LGPD — compliance e proteção de dados
+    app.include_router(lgpd_router, prefix="/api/v1")
 
 
 app = create_app()

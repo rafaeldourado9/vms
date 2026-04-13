@@ -117,7 +117,15 @@ def audit_action(
                                 result=result,
                             )
                     except Exception:
-                        logger.debug("Falha ao registrar audit log (não crítico)", exc_info=True)
+                        logger.critical("AUDIT LOG INSERT FAILED — action=%s tenant=%s user=%s",
+                                        action, tenant_id, user_id, exc_info=True)
+                        # Métrica Prometheus (se disponível)
+                        try:
+                            from prometheus_client import Counter
+                            _audit_failures = Counter("audit_log_failures_total", "Falhas ao inserir audit log")
+                            _audit_failures.inc()
+                        except Exception:
+                            pass  # Prometheus não disponível
 
                 return response
 
@@ -149,7 +157,14 @@ def audit_action(
                                 result="error",
                             )
                     except Exception:
-                        logger.debug("Falha ao registrar audit log de erro (não crítico)", exc_info=True)
+                        logger.critical("AUDIT LOG ERROR INSERT FAILED — action=%s tenant=%s user=%s",
+                                        action, tenant_id, user_id, exc_info=True)
+                        try:
+                            from prometheus_client import Counter
+                            _audit_failures = Counter("audit_log_failures_total", "Falhas ao inserir audit log")
+                            _audit_failures.inc()
+                        except Exception:
+                            pass
 
         return wrapper
     return decorator

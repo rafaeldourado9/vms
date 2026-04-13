@@ -84,6 +84,20 @@ async def _camera_counts() -> tuple[int, int]:
         return 0, 0
 
 
+async def _check_analytics() -> str:
+    """Verifica se o Analytics Service está respondendo."""
+    try:
+        settings = get_settings()
+        # Analytics service roda em porta separada (normalmente 9001)
+        analytics_url = getattr(settings, "analytics_url", "http://analytics:9001/health")
+        async with httpx.AsyncClient(timeout=2.0) as client:
+            resp = await client.get(analytics_url)
+        return "ok" if resp.status_code == 200 else "degraded"
+    except Exception as exc:
+        logger.warning("Health check Analytics falhou: %s", exc)
+        return "degraded"
+
+
 @router.get("/health", summary="Health check", tags=["health"])
 async def health_check() -> dict:
     """
@@ -96,11 +110,12 @@ async def health_check() -> dict:
     redis_status = await _check_redis()
     rabbitmq_status = await _check_rabbitmq()
     mediamtx_status = await _check_mediamtx()
+    analytics_status = await _check_analytics()
 
     cameras_online, cameras_total = await _camera_counts()
 
     all_ok = all(
-        s == "ok" for s in (db_status, redis_status, rabbitmq_status, mediamtx_status)
+        s == "ok" for s in (db_status, redis_status, rabbitmq_status, mediamtx_status, analytics_status)
     )
 
     return {
@@ -110,6 +125,7 @@ async def health_check() -> dict:
             "redis": redis_status,
             "rabbitmq": rabbitmq_status,
             "mediamtx": mediamtx_status,
+            "analytics": analytics_status,
         },
         "cameras_online": cameras_online,
         "cameras_total": cameras_total,

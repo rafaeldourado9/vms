@@ -1,7 +1,7 @@
 """billing: create usage_records table
 
 Revision ID: 018
-Revises: 017
+Revises: 017b
 Create Date: 2026-04-12 19:00:00.000000
 """
 from typing import Sequence, Union
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
 revision: str = '018'
-down_revision: Union[str, None] = '017'
+down_revision: Union[str, None] = '017b'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

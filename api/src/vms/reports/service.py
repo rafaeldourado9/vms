@@ -20,6 +20,20 @@ class ReportService:
     def __init__(self, repo: ReportRepositoryPort) -> None:
         self._repo = repo
 
+    async def get_report(self, report_id: str, tenant_id: str) -> Report | None:
+        """Retorna relatório por ID."""
+        return await self._repo.get_by_id(report_id, tenant_id)
+
+    async def list_reports(
+        self,
+        tenant_id: str,
+        page: int = 1,
+        page_size: int = 20,
+    ) -> tuple[list[Report], int]:
+        """Lista relatórios do tenant com paginação."""
+        offset = (page - 1) * page_size
+        return await self._repo.list_by_tenant(tenant_id, limit=page_size, offset=offset)
+
     async def create_report(
         self,
         tenant_id: str,
@@ -56,8 +70,8 @@ class ReportService:
                 ReportType.EVENTS_SUMMARY: "events_report",
                 ReportType.CAMERAS_STATUS: "cameras_report",
                 ReportType.RECORDINGS_COVERAGE: "recordings_report",
-                ReportType.AUDIT_TRAIL: "base",  # Placeholder
-                ReportType.ANALYTICS_EVENTS: "base",  # Placeholder
+                ReportType.AUDIT_TRAIL: "audit_trail",
+                ReportType.ANALYTICS_EVENTS: "analytics_events",
             }
             template_name = template_map.get(report.report_type, "base")
 
@@ -70,10 +84,12 @@ class ReportService:
             html = render_template(template_name, context)
 
             # Gerar PDF
-            pdf_bytes = generate_pdf(html)
+            css_path = os.path.join(os.path.dirname(__file__), "templates", "base.css")
+            pdf_bytes = generate_pdf(html, css_path=css_path if os.path.exists(css_path) else None)
 
             # Salvar em disco
-            output_dir = os.environ.get("REPORTS_PATH", "/tmp/reports")
+            import tempfile
+            output_dir = os.environ.get("REPORTS_PATH", os.path.join(tempfile.gettempdir(), "reports"))
             os.makedirs(output_dir, exist_ok=True)
 
             filename = f"report_{report.id.value if hasattr(report.id, 'value') else report.id}.pdf"

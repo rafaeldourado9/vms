@@ -474,15 +474,45 @@ Report Generated: {DT.now(timezone.utc).isoformat()}
     # Assinar com HMAC-SHA256
     signature = sign_webhook_payload(zip_bytes, "forensic-export")
 
-    # TODO: Salvar ZIP em disco ou retornar como stream
-    # Por enquanto, retorna metadata do export
+    # Salvar ZIP em disco
+    import tempfile
+    forensic_dir = os.environ.get("FORENSIC_EXPORT_PATH", os.path.join(tempfile.gettempdir(), "forensic_exports"))
+    os.makedirs(forensic_dir, exist_ok=True)
+
+    zip_filename = f"forensic_{recording_id}_{DT.now(timezone.utc).strftime('%Y%m%d_%H%M%S')}.zip"
+    zip_path = os.path.join(forensic_dir, zip_filename)
+
+    with open(zip_path, "wb") as f:
+        f.write(zip_bytes)
+
+    # Persistir custody_chain entry
+    custody_entry = {
+        "action": "recording.exported_forensic",
+        "timestamp": DT.now(timezone.utc).isoformat(),
+        "actor": str(claims.user_id),
+        "user_email": getattr(claims, "email", None),
+        "file_path": zip_path,
+        "zip_size_bytes": len(zip_bytes),
+        "hmac_signature": signature,
+    }
+    current_chain = getattr(segment, "custody_chain", []) or []
+    current_chain.append(custody_entry)
+    await svc._segments.update_integrity(
+        segment_id=recording_id,
+        tenant_id=claims.tenant_id,
+        custody_chain=current_chain,
+    )
+
+    logger.info("Export forense salvo: %s (%d bytes)", zip_path, len(zip_bytes))
+
     return {
         "recording_id": recording_id,
         "exported_at": DT.now(timezone.utc).isoformat(),
-        "exported_by": claims.user_id,
+        "exported_by": str(claims.user_id),
+        "file_path": zip_path,
+        "download_url": f"/api/v1/recordings/forensic/{recording_id}/download",
         "zip_size_bytes": len(zip_bytes),
         "sha256_hash": current_hash.value,
         "hmac_signature": signature,
         "integrity_verified": is_verified,
-        "note": "ZIP package ready for download (implementation pending storage backend)",
     }
