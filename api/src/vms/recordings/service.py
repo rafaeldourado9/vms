@@ -9,6 +9,7 @@ from datetime import UTC, datetime, timedelta
 
 from vms.recordings.domain import Clip, RecordingSegment
 from vms.recordings.repository import ClipRepositoryPort, RecordingSegmentRepositoryPort
+from vms.shared.value_objects import Sha256Hash
 
 logger = logging.getLogger(__name__)
 
@@ -41,11 +42,21 @@ class RecordingService:
         Indexa segmento de gravação.
 
         Extrai tenant_id/camera_id do mediamtx_path se não fornecidos explicitamente.
+        Calcula SHA-256 do arquivo para cadeia de custódia.
         """
         resolved_tenant, resolved_camera = _resolve_ids(
             mediamtx_path, tenant_id, camera_id
         )
         started_at, ended_at, duration, size = _parse_file_metadata(file_path)
+
+        # Calcular SHA-256 se arquivo existe
+        sha256_hash = None
+        try:
+            if os.path.exists(file_path):
+                sha256_hash = Sha256Hash.from_file(file_path)
+                logger.debug("SHA-256 calculado para segmento: %s", file_path)
+        except Exception:
+            logger.warning("Falha ao calcular SHA-256 para %s (não crítico)", file_path, exc_info=True)
 
         segment = RecordingSegment(
             id=str(uuid.uuid4()),
@@ -57,6 +68,7 @@ class RecordingService:
             ended_at=ended_at,
             duration_seconds=duration,
             size_bytes=size,
+            sha256_hash=sha256_hash,
         )
         return await self._segments.create(segment)
 

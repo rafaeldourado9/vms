@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from vms.recordings.domain import Clip, ClipStatus, RecordingSegment
 from vms.recordings.models import ClipModel, RecordingSegmentModel
+from vms.shared.value_objects import Sha256Hash
 
 
 # ─── Ports (interfaces) ───────────────────────────────────────────────────────
@@ -50,6 +51,8 @@ class ClipRepositoryPort(Protocol):
 
 def _segment_to_domain(m: RecordingSegmentModel) -> RecordingSegment:
     """Converte modelo ORM para entidade de domínio RecordingSegment."""
+    sha256_hash = Sha256Hash(m.sha256_hash) if m.sha256_hash else None
+    custody_chain = m.custody_chain or [] if isinstance(m.custody_chain, list) else []
     return RecordingSegment(
         id=m.id,
         tenant_id=m.tenant_id,
@@ -60,6 +63,7 @@ def _segment_to_domain(m: RecordingSegmentModel) -> RecordingSegment:
         ended_at=m.ended_at,
         duration_seconds=m.duration_seconds,
         size_bytes=m.size_bytes,
+        sha256_hash=sha256_hash,
     )
 
 
@@ -98,6 +102,7 @@ class RecordingSegmentRepository:
             ended_at=segment.ended_at,
             duration_seconds=segment.duration_seconds,
             size_bytes=segment.size_bytes,
+            sha256_hash=segment.sha256_hash.value if segment.sha256_hash else None,
         )
         self._session.add(model)
         await self._session.flush()
@@ -150,6 +155,39 @@ class RecordingSegmentRepository:
         )
         result = await self._session.execute(stmt)
         return result.rowcount
+
+    async def update_integrity(
+        self,
+        segment_id: str,
+        tenant_id: str,
+        sha256_hash: str | None = None,
+        integrity_verified_at: datetime | None = None,
+        custody_chain: list | None = None,
+    ) -> RecordingSegment | None:
+        """Atualiza campos de integridade e cadeia de custódia."""
+        from sqlalchemy import update as sa_update
+
+        values = {}
+        if sha256_hash is not None:
+            values["sha256_hash"] = sha256_hash
+        if integrity_verified_at is not None:
+            values["integrity_verified_at"] = integrity_verified_at
+        if custody_chain is not None:
+            values["custody_chain"] = custody_chain
+
+        if not values:
+            return await self.get_by_id(segment_id, tenant_id)
+
+        stmt = (
+            sa_update(RecordingSegmentModel)
+            .where(
+                RecordingSegmentModel.id == segment_id,
+                RecordingSegmentModel.tenant_id == tenant_id,
+            )
+            .values(**values)
+        )
+        await self._session.execute(stmt)
+        return await self.get_by_id(segment_id, tenant_id)
 
 
 class ClipRepository:

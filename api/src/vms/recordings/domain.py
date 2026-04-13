@@ -118,6 +118,9 @@ class RecordingSegment:
     duration_seconds: float
     size_bytes: int
     sha256_hash: Sha256Hash | None = None
+    # Cadeia de Custódia (Sprint 9)
+    custody_chain: list[dict] = field(default_factory=list)
+    integrity_verified_at: datetime | None = None
     # Analytics batch processing flags
     analytics_processed: bool = False
     analytics_plugins_processed: list[str] = field(default_factory=list)
@@ -231,6 +234,22 @@ class RecordingSegment:
     def is_processed_for(self, plugin_name: str) -> bool:
         """Verifica se segmento já foi processado por um plugin específico."""
         return plugin_name in self.analytics_plugins_processed
+
+    def add_custody_entry(self, action: str, actor: str, details: dict | None = None) -> None:
+        """
+        Adiciona entrada na cadeia de custódia (append-only, imutável).
+
+        Cada acesso, verificação ou export é registrado com timestamp.
+        """
+        from vms.shared.clock import clock
+        entry = {
+            "action": action,
+            "timestamp": clock.now().isoformat(),
+            "actor": actor,
+        }
+        if details:
+            entry.update(details)
+        self.custody_chain.append(entry)
 
 
 @dataclass
