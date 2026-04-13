@@ -110,6 +110,8 @@ class CameraService:
             stream_quality=stream_quality,
             agent_id=agent_id,
             ptz_supported=ptz_supported,
+            # ISAPI
+            isapi_enabled=False,
         )
         saved = await self._cameras.create(camera)
         # Registra path no MediaMTX com source URL se houver RTSP
@@ -153,6 +155,11 @@ class CameraService:
         stream_quality: StreamQuality | None = None,
         agent_id: str | None = None,
         is_active: bool | None = None,
+        # ISAPI
+        isapi_enabled: bool | None = None,
+        isapi_base_url: str | None = None,
+        isapi_username: str | None = None,
+        isapi_password: str | None = None,
     ) -> Camera:
         """Atualiza campos fornecidos da câmera."""
         camera = await self.get_camera(camera_id, tenant_id)
@@ -196,6 +203,17 @@ class CameraService:
             camera.agent_id = agent_id
         if is_active is not None:
             camera.is_active = is_active
+            
+        # ISAPI
+        if isapi_enabled is not None:
+            camera.isapi_enabled = isapi_enabled
+        if isapi_base_url is not None:
+            camera.isapi_base_url = isapi_base_url
+        if isapi_username is not None:
+            camera.isapi_username = isapi_username
+        if isapi_password is not None:
+            camera.isapi_password = isapi_password
+            
         updated = await self._cameras.update(camera)
 
         # Re-provision MediaMTX path se RTSP URL mudou

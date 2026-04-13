@@ -66,6 +66,15 @@ def _camera_to_domain(m: CameraModel) -> Camera:
         ptz_supported=m.ptz_supported,
         last_seen_at=m.last_seen_at,
         created_at=m.created_at,
+        # ISAPI
+        isapi_enabled=getattr(m, 'isapi_enabled', False),
+        isapi_base_url=m.isapi_base_url,
+        isapi_username=m.isapi_username,
+        isapi_password=m.isapi_password,  # Still encrypted in DB
+        serial_number=getattr(m, 'serial_number', None),
+        firmware_version=getattr(m, 'firmware_version', None),
+        model_name=getattr(m, 'model_name', None),
+        isapi_capabilities=getattr(m, 'isapi_capabilities', {}) or {},
     )
 
 
@@ -202,6 +211,15 @@ class CameraRepository:
             is_active=camera.is_active,
             is_online=camera.is_online,
             ptz_supported=camera.ptz_supported,
+            # ISAPI
+            isapi_enabled=camera.isapi_enabled,
+            isapi_base_url=camera.isapi_base_url,
+            isapi_username=camera.isapi_username,
+            isapi_password=camera.isapi_password,
+            serial_number=camera.serial_number,
+            firmware_version=camera.firmware_version,
+            model_name=camera.model_name,
+            isapi_capabilities=camera.isapi_capabilities,
         )
         self._session.add(model)
         await self._session.flush()
@@ -236,6 +254,15 @@ class CameraRepository:
                 is_online=camera.is_online,
                 ptz_supported=camera.ptz_supported,
                 last_seen_at=camera.last_seen_at,
+                # ISAPI
+                isapi_enabled=camera.isapi_enabled,
+                isapi_base_url=camera.isapi_base_url,
+                isapi_username=camera.isapi_username,
+                isapi_password=camera.isapi_password,
+                serial_number=camera.serial_number,
+                firmware_version=camera.firmware_version,
+                model_name=camera.model_name,
+                isapi_capabilities=camera.isapi_capabilities,
             )
         )
         await self._session.execute(stmt)

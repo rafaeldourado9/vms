@@ -5,6 +5,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, func
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from vms.core.database import Base
@@ -88,5 +89,15 @@ class CameraModel(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
+    
+    # ISAPI Integration (Hikvision)
+    isapi_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    isapi_base_url: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    isapi_username: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    isapi_password: Mapped[str | None] = mapped_column(String(500), nullable=True)  # Encrypted
+    serial_number: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    firmware_version: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    model_name: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    isapi_capabilities: Mapped[dict | None] = mapped_column(JSONB, nullable=True, server_default="{}")
 
     agent: Mapped[AgentModel | None] = relationship("AgentModel", back_populates="cameras")

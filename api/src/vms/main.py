@@ -205,6 +205,7 @@ def _include_routers(app: FastAPI) -> None:
     from vms.health.router import router as health_router
     from vms.iam.router import router as iam_router
     from vms.cameras.router import router as cameras_router
+    from vms.cameras.isapi_router import router as isapi_router
     from vms.events.router import router as events_router
     from vms.recordings.router import router as recordings_router
     from vms.notifications.router import router as notifications_router
@@ -225,6 +226,7 @@ def _include_routers(app: FastAPI) -> None:
 
     # Recursos principais
     app.include_router(cameras_router, prefix="/api/v1")
+    app.include_router(isapi_router, prefix="/api/v1")
     app.include_router(events_router, prefix="/api/v1")
     app.include_router(recordings_router, prefix="/api/v1")
 

@@ -228,6 +228,16 @@ class Camera(AggregateRoot):
     ptz_supported: bool = False
     last_seen_at: datetime | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    
+    # ISAPI Integration (Hikvision)
+    isapi_enabled: bool = False
+    isapi_base_url: str | None = None
+    isapi_username: str | None = None
+    isapi_password: str | None = None  # Encrypted
+    serial_number: str | None = None
+    firmware_version: str | None = None
+    model_name: str | None = None
+    isapi_capabilities: dict = field(default_factory=dict)
 
     # ─── Factories ───────────────────────────────────────────────────────
 

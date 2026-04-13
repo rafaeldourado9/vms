@@ -89,6 +89,12 @@ class UpdateCameraRequest(BaseModel):
     retention_days: int | None = Field(default=None, ge=1, le=90)
     agent_id: str | None = None
     is_active: bool | None = None
+    
+    # ISAPI
+    isapi_enabled: bool | None = None
+    isapi_base_url: str | None = Field(default=None, max_length=2000)
+    isapi_username: str | None = Field(default=None, max_length=255)
+    isapi_password: str | None = Field(default=None, max_length=500)
 
 
 class CameraResponse(BaseModel):
@@ -118,6 +124,15 @@ class CameraResponse(BaseModel):
     agent_id: str | None
     last_seen_at: datetime | None
     created_at: datetime
+    
+    # ISAPI
+    isapi_enabled: bool
+    isapi_base_url: str | None
+    isapi_username: str | None
+    serial_number: str | None
+    firmware_version: str | None
+    model_name: str | None
+    isapi_capabilities: dict
 
 
 class StreamUrlsResponse(BaseModel):
