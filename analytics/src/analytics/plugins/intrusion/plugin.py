@@ -16,11 +16,18 @@ class IntrusionDetectionPlugin(YOLOPlugin):
     """
     Detecta presença de objetos (padrão: pessoa) dentro de uma ROI.
 
+    Gerenciamento de estado de presença:
+    - intruder.started: intruso entrou na ROI
+    - intruder.ongoing: intruso ainda presente (a cada N s)
+    - intruder.cleared: intruso saiu da ROI
+
     Lógica:
     1. Inferência YOLO no frame completo
     2. Filtra pelas classes configuradas na ROI
     3. Para cada ROI, verifica se centroide da bbox está dentro do polígono
-    4. Emite evento se houver detecção, respeitando cooldown
+    4. Emite evento.started quando intruso detectado
+    5. Emite evento.ongoing se intruso permanece (a cada ongoing_interval)
+    6. Emite evento.cleared quando intruso some por > grace_frames
     """
 
     name = "intrusion_detection"
@@ -31,6 +38,11 @@ class IntrusionDetectionPlugin(YOLOPlugin):
         super().__init__()
         # Cooldown por ROI: {roi_id: last_emit_timestamp}
         self._cooldowns: dict[str, float] = {}
+        # Estado de presença por ROI: {roi_id: {"detected_at": float, "last_seen": float, "count": int}}
+        self._active_intrusions: dict[str, dict] = {}
+        self._ongoing_interval: float = 30.0  # segundos entre eventos ongoing
+        self._grace_frames: int = 10  # frames sem detecção antes de "cleared"
+        self._frame_counts: dict[str, int] = {}
 
     async def process_frame(
         self,
@@ -82,21 +94,13 @@ class IntrusionDetectionPlugin(YOLOPlugin):
         metadata: FrameMetadata,
         min_conf: float,
     ) -> list[AnalyticsResult]:
-        """Lógica comum de processamento de detecções."""
+        """Lógica comum de processamento de detecções com estado de presença."""
         results: list[AnalyticsResult] = []
-
-        if not detections:
-            return results
 
         import time
         now = time.monotonic()
 
         for roi in rois:
-            cooldown = roi.config.get("cooldown_seconds", 30)
-            last_emit = self._cooldowns.get(roi.id, 0.0)
-            if now - last_emit < cooldown:
-                continue
-
             roi_classes = set(roi.config.get("classes", [0]))
             roi_conf = roi.config.get("min_confidence", 0.5)
 
@@ -108,31 +112,80 @@ class IntrusionDetectionPlugin(YOLOPlugin):
 
             # Filtra por polígono
             in_roi = self.filter_in_roi(roi_detections, roi.polygon_points)
+            has_intrusion = len(in_roi) > 0
 
-            if in_roi:
-                self._cooldowns[roi.id] = now
-                results.append(
-                    AnalyticsResult(
-                        plugin=self.name,
-                        camera_id=metadata.camera_id,
-                        tenant_id=metadata.tenant_id,
-                        roi_id=roi.id,
-                        event_type="analytics.intrusion.detected",
-                        payload={
-                            "roi_id": roi.id,
-                            "roi_name": roi.name,
-                            "detection_count": len(in_roi),
-                            "detections": [
-                                {
-                                    "class": d["class_name"],
-                                    "confidence": round(d["confidence"], 2),
-                                    "bbox": d["bbox"],
-                                }
-                                for d in in_roi
-                            ],
-                        },
-                        occurred_at=metadata.timestamp,
-                    )
-                )
+            # Atualizar frame count para grace period
+            self._frame_counts[roi.id] = self._frame_counts.get(roi.id, 0) + 1
+
+            if has_intrusion:
+                # Reset grace count
+                self._frame_counts[roi.id] = 0
+
+                if roi.id not in self._active_intrusions:
+                    # Novo intruso → evento.started
+                    self._active_intrusions[roi.id] = {
+                        "detected_at": now,
+                        "last_seen": now,
+                        "count": 1,
+                    }
+                    self._cooldowns[roi.id] = now  # Reset cooldown
+                    results.append(self._make_result(
+                        roi, in_roi, metadata, "analytics.intrusion.started", now
+                    ))
+                else:
+                    # Intruso ainda presente → verificar ongoing
+                    intrusion = self._active_intrusions[roi.id]
+                    intrusion["last_seen"] = now
+                    intrusion["count"] += 1
+
+                    # Evento ongoing a cada N segundos
+                    if now - self._cooldowns.get(roi.id, 0) >= self._ongoing_interval:
+                        self._cooldowns[roi.id] = now
+                        results.append(self._make_result(
+                            roi, in_roi, metadata, "analytics.intrusion.ongoing", now
+                        ))
+            else:
+                # Sem detecção → verificar grace period
+                if roi.id in self._active_intrusions:
+                    grace_count = self._frame_counts.get(roi.id, 0)
+                    if grace_count >= self._grace_frames:
+                        # Intruso saiu → evento.cleared
+                        intrusion = self._active_intrusions.pop(roi.id)
+                        self._cooldowns.pop(roi.id, None)
+                        results.append(self._make_result(
+                            roi, [], metadata, "analytics.intrusion.cleared", now
+                        ))
 
         return results
+
+    def _make_result(
+        self,
+        roi: ROIConfig,
+        detections: list[dict],
+        metadata: FrameMetadata,
+        event_type: str,
+        now: float,
+    ) -> AnalyticsResult:
+        """Cria AnalyticsResult com payload padronizado."""
+        return AnalyticsResult(
+            plugin=self.name,
+            camera_id=metadata.camera_id,
+            tenant_id=metadata.tenant_id,
+            roi_id=roi.id,
+            event_type=event_type,
+            payload={
+                "roi_id": roi.id,
+                "roi_name": roi.name,
+                "detection_count": len(detections),
+                "event_subtype": event_type.split(".")[-1],  # started, ongoing, cleared
+                "detections": [
+                    {
+                        "class": d["class_name"],
+                        "confidence": round(d["confidence"], 2),
+                        "bbox": d["bbox"],
+                    }
+                    for d in detections
+                ],
+            },
+            occurred_at=metadata.timestamp,
+        )

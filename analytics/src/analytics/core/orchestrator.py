@@ -9,7 +9,9 @@ from pathlib import Path
 from typing import Any
 
 from analytics.core.config import get_settings
+from analytics.core.detection_cache import DetectionCache
 from analytics.core.frame_source import FrameSource
+from analytics.core.metrics import MetricsCollector
 from analytics.core.plugin_base import (
     AnalyticsPlugin,
     AnalyticsResult,
@@ -51,6 +53,10 @@ class Orchestrator:
         self._vms_client = VMSClient()
         self._running = False
         self._tasks: list[asyncio.Task[None]] = []
+        # Performance & Scale (Sprint 6)
+        self._detection_cache = DetectionCache(max_empty_frames=30, ttl_seconds=60.0)
+        self._metrics = MetricsCollector()
+        self._gpu_semaphore: asyncio.Semaphore | None = None
 
     @property
     def plugins(self) -> list[AnalyticsPlugin]:
@@ -308,12 +314,21 @@ class Orchestrator:
             source.close()
             return
 
+        # Inicializar GPU semaphore se não existir
+        if self._gpu_semaphore is None:
+            settings = get_settings()
+            self._gpu_semaphore = asyncio.Semaphore(max(1, settings.analytics_workers))
+
         try:
             while self._running:
                 frame = source.read()
                 if frame is None:
                     await asyncio.sleep(0.05)
                     continue
+
+                # Detection Cache: decidir se processa ou skip
+                # Para shared inference, verificamos antes da inferência
+                # (precisamos rodar YOLO para saber se há detecções)
 
                 metadata = FrameMetadata(
                     camera_id=camera_id,
@@ -322,55 +337,72 @@ class Orchestrator:
                     stream_url=rtsp_url,
                 )
 
-                # 1. Shared inference: 1 inferência → múltiplos plugins
-                if shared_plugins and self._shared_engines:
-                    # Pegar a primeira engine compartilhada (assumimos 1 modelo compartilhado)
-                    engine_key = next(iter(self._shared_engines))
-                    engine = self._shared_engines[engine_key]
-                    all_classes = getattr(engine, "_all_classes", set())
+                # GPU Semaphore: controlar concorrência
+                async with self._gpu_semaphore:
+                    import time as _time
+                    t0 = _time.monotonic()
 
-                    # Executar inferência UNA
-                    shared_detections = engine.predict(
-                        frame,
-                        classes=all_classes,
-                        conf=0.30,
-                    )
+                    # 1. Shared inference: 1 inferência → múltiplos plugins
+                    if shared_plugins and self._shared_engines:
+                        engine_key = next(iter(self._shared_engines))
+                        engine = self._shared_engines[engine_key]
+                        all_classes = getattr(engine, "_all_classes", set())
 
-                    # Distribuir para cada plugin (cada um filtra suas classes)
-                    for plugin in shared_plugins:
+                        # Executar inferência UNA
+                        shared_detections = engine.predict(
+                            frame,
+                            classes=all_classes,
+                            conf=0.30,
+                        )
+
+                        # Detection Cache: decidir se processa plugins
+                        should_process = self._detection_cache.should_process(
+                            camera_id,
+                            shared_detections,
+                        )
+
+                        # Track metrics
+                        inference_ms = (_time.monotonic() - t0) * 1000
+                        self._metrics.record_inference(camera_id, inference_ms, len(shared_detections))
+
+                        if should_process:
+                            # Distribuir para cada plugin (cada um filtra suas classes)
+                            for plugin in shared_plugins:
+                                try:
+                                    plugin_classes = PLUGIN_CLASSES.get(plugin.name, set())
+                                    plugin_detections = engine.filter_by_class(
+                                        shared_detections,
+                                        plugin_classes,
+                                    )
+                                    results = await plugin.process_shared_frame(
+                                        plugin_detections,
+                                        frame,
+                                        metadata,
+                                        zones,
+                                    )
+                                    for result in results:
+                                        await self._send_result(result)
+                                        self._metrics.record_event(result.plugin, result.event_type)
+                                except Exception:
+                                    logger.exception(
+                                        "Erro no plugin shared %s para câmera %s",
+                                        plugin.name,
+                                        camera_id,
+                                    )
+
+                    # 2. Standalone inference: plugins com modelo próprio
+                    for plugin in standalone_plugins:
                         try:
-                            plugin_classes = PLUGIN_CLASSES.get(plugin.name, set())
-                            plugin_detections = engine.filter_by_class(
-                                shared_detections,
-                                plugin_classes,
-                            )
-                            results = await plugin.process_shared_frame(
-                                plugin_detections,
-                                frame,
-                                metadata,
-                                zones,
-                            )
+                            results = await plugin.process_frame(frame, metadata, zones)
                             for result in results:
                                 await self._send_result(result)
+                                self._metrics.record_event(result.plugin, result.event_type)
                         except Exception:
                             logger.exception(
-                                "Erro no plugin shared %s para câmera %s",
+                                "Erro no plugin standalone %s para câmera %s",
                                 plugin.name,
                                 camera_id,
                             )
-
-                # 2. Standalone inference: plugins com modelo próprio
-                for plugin in standalone_plugins:
-                    try:
-                        results = await plugin.process_frame(frame, metadata, zones)
-                        for result in results:
-                            await self._send_result(result)
-                    except Exception:
-                        logger.exception(
-                            "Erro no plugin standalone %s para câmera %s",
-                            plugin.name,
-                            camera_id,
-                        )
         finally:
             source.close()
 
