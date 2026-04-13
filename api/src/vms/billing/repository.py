@@ -1,4 +1,4 @@
-"""Repositório SQLAlchemy para faturamento."""
+"""Repositório SQLAlchemy para licenças."""
 from __future__ import annotations
 
 from datetime import datetime
@@ -7,118 +7,99 @@ from typing import Protocol
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from vms.billing.domain import BillingPlan, QuotaStatus, UsageRecord
-from vms.billing.models import BillingPlanModel, UsageRecordModel
+from vms.billing.domain import License, LicenseStatus, LicenseType, LicenseValidation
+from vms.billing.models import LicenseModel
 
 
-class BillingRepositoryPort(Protocol):
-    """Interface do repositório de faturamento."""
+class LicenseRepositoryPort(Protocol):
+    """Interface do repositório de licenças."""
 
-    async def get_plan_by_slug(self, slug: str) -> BillingPlan | None: ...
-    async def list_active_plans(self) -> list[BillingPlan]: ...
-    async def record_usage(self, record: UsageRecord) -> UsageRecord: ...
-    async def get_current_usage(self, tenant_id: str) -> dict[str, float]: ...
+    async def create(self, license: License) -> License: ...
+    async def get_by_camera(self, camera_id: str, tenant_id: str) -> License | None: ...
+    async def get_active_by_tenant(self, tenant_id: str) -> list[License]: ...
+    async def validate_camera(self, camera_id: str, tenant_id: str) -> LicenseValidation: ...
 
 
-def _plan_to_domain(model: BillingPlanModel) -> BillingPlan:
-    return BillingPlan(
+def _to_domain(model: LicenseModel) -> License:
+    return License(
         id=model.id,
-        name=model.name,
-        slug=model.slug,
-        description=model.description,
-        price_monthly=float(model.price_monthly or 0),
-        max_cameras=model.max_cameras,
+        tenant_id=model.tenant_id,
+        camera_id=model.camera_id,
+        license_type=LicenseType(model.license_type),
+        status=LicenseStatus(model.status),
         storage_limit_gb=model.storage_limit_gb,
-        max_events_per_month=model.max_events_per_month,
-        max_retention_days=model.max_retention_days or 7,
-        analytics_enabled=model.analytics_enabled if model.analytics_enabled is not None else True,
-        features=model.features or {},
-        is_active=model.is_active if model.is_active is not None else True,
+        analytics_enabled=model.analytics_enabled if model.analytics_enabled is not None else False,
+        activated_at=model.activated_at or datetime.utcnow(),
+        expires_at=model.expires_at,
         created_at=model.created_at or datetime.utcnow(),
     )
 
 
-def _usage_to_domain(model: UsageRecordModel) -> UsageRecord:
-    return UsageRecord(
-        id=model.id,
-        tenant_id=model.tenant_id,
-        metric_name=model.metric_name,
-        value=float(model.value or 0),
-        unit=model.unit,
-        period_start=model.period_start,
-        period_end=model.period_end,
-        recorded_at=model.recorded_at or datetime.utcnow(),
-    )
-
-
-class BillingRepository:
-    """Repositório SQLAlchemy para Billing."""
+class LicenseRepository:
+    """Repositório SQLAlchemy para Licenças."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
-    async def get_plan_by_slug(self, slug: str) -> BillingPlan | None:
-        stmt = select(BillingPlanModel).where(
-            BillingPlanModel.slug == slug,
-            BillingPlanModel.is_active.is_(True),
-        )
-        model = await self._session.scalar(stmt)
-        return _plan_to_domain(model) if model else None
-
-    async def list_active_plans(self) -> list[BillingPlan]:
-        stmt = select(BillingPlanModel).where(
-            BillingPlanModel.is_active.is_(True),
-        ).order_by(BillingPlanModel.price_monthly)
-        result = await self._session.scalars(stmt)
-        return [_plan_to_domain(m) for m in result.all()]
-
-    async def record_usage(self, record: UsageRecord) -> UsageRecord:
-        model = UsageRecordModel(
-            id=record.id if hasattr(record, 'id') else record.id,
-            tenant_id=record.tenant_id,
-            metric_name=record.metric_name,
-            value=record.value,
-            unit=record.unit,
-            period_start=record.period_start,
-            period_end=record.period_end,
+    async def create(self, license: License) -> License:
+        """Cria nova licença."""
+        model = LicenseModel(
+            id=license.id if hasattr(license.id, 'value') else license.id,
+            tenant_id=license.tenant_id.value if hasattr(license.tenant_id, 'value') else license.tenant_id,
+            camera_id=license.camera_id,
+            license_type=license.license_type,
+            status=license.status,
+            storage_limit_gb=license.storage_limit_gb,
+            analytics_enabled=license.analytics_enabled,
+            expires_at=license.expires_at,
         )
         self._session.add(model)
         await self._session.flush()
         await self._session.refresh(model)
-        return _usage_to_domain(model)
+        return _to_domain(model)
 
-    async def get_current_usage(self, tenant_id: str) -> dict[str, float]:
-        """Retorna contagens atuais do tenant."""
-        from vms.cameras.models import CameraModel
-        from vms.events.models import VmsEventModel
-        from vms.recordings.models import RecordingSegmentModel
-        from datetime import datetime, timezone
-
-        now = datetime.now(timezone.utc)
-        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-
-        # Câmeras ativas
-        cameras_stmt = select(func.count()).select_from(CameraModel).where(
-            CameraModel.tenant_id == tenant_id,
-            CameraModel.is_active.is_(True),
+    async def get_by_camera(self, camera_id: str, tenant_id: str) -> License | None:
+        """Busca licença ativa de uma câmera."""
+        stmt = select(LicenseModel).where(
+            LicenseModel.camera_id == camera_id,
+            LicenseModel.tenant_id == tenant_id,
+            LicenseModel.status == LicenseStatus.ACTIVE,
         )
-        cameras = await self._session.scalar(cameras_stmt) or 0
+        model = await self._session.scalar(stmt)
+        return _to_domain(model) if model else None
 
-        # Storage usado
-        storage_stmt = select(func.coalesce(func.sum(RecordingSegmentModel.size_bytes), 0)).where(
-            RecordingSegmentModel.tenant_id == tenant_id,
+    async def get_active_by_tenant(self, tenant_id: str) -> list[License]:
+        """Lista licenças ativas do tenant."""
+        stmt = select(LicenseModel).where(
+            LicenseModel.tenant_id == tenant_id,
+            LicenseModel.status == LicenseStatus.ACTIVE,
         )
-        storage = await self._session.scalar(storage_stmt) or 0
+        result = await self._session.scalars(stmt)
+        return [_to_domain(m) for m in result.all()]
 
-        # Eventos do mês
-        events_stmt = select(func.count()).select_from(VmsEventModel).where(
-            VmsEventModel.tenant_id == tenant_id,
-            VmsEventModel.occurred_at >= month_start,
+    async def validate_camera(self, camera_id: str, tenant_id: str) -> LicenseValidation:
+        """Valida se câmera tem licença ativa."""
+        license = await self.get_by_camera(camera_id, tenant_id)
+
+        if not license:
+            return LicenseValidation(
+                is_valid=False,
+                reason="Nenhuma licença encontrada para esta câmera",
+            )
+
+        if not license.is_active:
+            return LicenseValidation(
+                is_valid=False,
+                license=license,
+                reason=f"Licença {license.license_type} expirada ou inativa",
+            )
+
+        return LicenseValidation(is_valid=True, license=license)
+
+    async def count_active_by_tenant(self, tenant_id: str) -> int:
+        """Conta licenças ativas do tenant."""
+        stmt = select(func.count()).select_from(LicenseModel).where(
+            LicenseModel.tenant_id == tenant_id,
+            LicenseModel.status == LicenseStatus.ACTIVE,
         )
-        events = await self._session.scalar(events_stmt) or 0
-
-        return {
-            "cameras": float(cameras),
-            "storage_bytes": float(storage),
-            "events_month": float(events),
-        }
+        return await self._session.scalar(stmt) or 0

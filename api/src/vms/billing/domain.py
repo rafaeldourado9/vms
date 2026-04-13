@@ -1,94 +1,106 @@
-"""Entidades de domínio de faturamento e licenças."""
+"""Entidades de domínio de faturamento — Licenciamento por recurso."""
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
+from enum import StrEnum
 from typing import Any
 
 from vms.shared.events import DomainEvent
 from vms.shared.kernel import AuditId, BillingId, EntityId, TenantId
 
 
+class LicenseType(StrEnum):
+    """Tipos de licença disponíveis."""
+
+    CAMERA_ONLY = "camera_only"              # Só gravação/streaming
+    CAMERA_STORAGE = "camera_storage"        # Câmera + storage adicional
+    CAMERA_ANALYTICS = "camera_analytics"    # Câmera + storage + IA/analytics
+
+
+class LicenseStatus(StrEnum):
+    """Estado de uma licença."""
+
+    ACTIVE = "active"
+    EXPIRED = "expired"
+    REVOKED = "revoked"
+
+
 @dataclass(frozen=True)
-class QuotaExceeded(DomainEvent):
-    """Evento: tenant excedeu limite de quota."""
+class LicenseCreated(DomainEvent):
+    """Evento: licença criada para câmera."""
+    license_id: BillingId | None = None
     tenant_id: TenantId | None = None
-    metric_name: str = ""
-    used: float = 0
-    limit: float = 0
-    severity: str = "warning"  # warning (80%) ou critical (100%)
+    camera_id: str | None = None
+    license_type: str = ""
+
+
+@dataclass(frozen=True)
+class LicenseExpired(DomainEvent):
+    """Evento: licença expirou."""
+    license_id: BillingId | None = None
+    tenant_id: TenantId | None = None
+    camera_id: str | None = None
 
 
 @dataclass
-class BillingPlan:
-    """Plano de assinatura com limites e recursos."""
+class License:
+    """
+    Licença de uso por câmera.
+
+    Modelo de negócio:
+    - Cada câmera precisa de uma licença ativa para funcionar
+    - CAMERA_ONLY: gravação e streaming básico
+    - CAMERA_STORAGE: câmera + storage adicional configurável
+    - CAMERA_ANALYTICS: câmera + storage + IA/analytics
+
+    Sem licença ativa → câmera não grava, não faz analytics.
+    """
 
     id: BillingId
-    name: str
-    slug: str
-    description: str | None = None
-    price_monthly: float = 0.0
-    max_cameras: int | None = None
+    tenant_id: TenantId
+    camera_id: str | None = None  # NULL = licença avulsa (para ativar depois)
+    license_type: LicenseType = LicenseType.CAMERA_ONLY
+    status: LicenseStatus = LicenseStatus.ACTIVE
     storage_limit_gb: int | None = None
-    max_events_per_month: int | None = None
-    max_retention_days: int = 7
-    analytics_enabled: bool = True
-    features: dict = field(default_factory=dict)
-    is_active: bool = True
+    analytics_enabled: bool = False
+    activated_at: datetime = field(default_factory=datetime.utcnow)
+    expires_at: datetime | None = None
     created_at: datetime = field(default_factory=datetime.utcnow)
 
-
-@dataclass
-class Subscription:
-    """Vínculo entre tenant e plano de assinatura."""
-
-    tenant_id: TenantId
-    plan_id: BillingId
-    status: str = "active"  # active, cancelled, expired
-    started_at: datetime | None = None
-    expires_at: datetime | None = None
-
-
-@dataclass
-class UsageRecord:
-    """Registro de consumo de um recurso por tenant."""
-
-    id: BillingId
-    tenant_id: TenantId
-    metric_name: str
-    value: float
-    unit: str | None = None
-    period_start: datetime = field(default_factory=datetime.utcnow)
-    period_end: datetime = field(default_factory=datetime.utcnow)
-    recorded_at: datetime = field(default_factory=datetime.utcnow)
-
-
-@dataclass
-class QuotaStatus:
-    """Status atual de uma métrica de quota."""
-
-    metric_name: str
-    used: float
-    limit: float | None  # None = ilimitado
-    unit: str = ""
-
     @property
-    def is_unlimited(self) -> bool:
-        return self.limit is None
-
-    @property
-    def usage_pct(self) -> float | None:
-        if self.is_unlimited or self.limit == 0:
-            return None
-        return (self.used / self.limit) * 100
-
-    @property
-    def is_warning(self) -> bool:
-        pct = self.usage_pct
-        return pct is not None and 80 <= pct < 100
-
-    @property
-    def is_exceeded(self) -> bool:
-        if self.is_unlimited:
+    def is_active(self) -> bool:
+        """Verifica se licença está ativo e não expirado."""
+        if self.status != LicenseStatus.ACTIVE:
             return False
-        return self.used >= self.limit
+        if self.expires_at and datetime.utcnow() > self.expires_at:
+            return False
+        return True
+
+    @property
+    def has_analytics(self) -> bool:
+        """Verifica se inclui analytics."""
+        return self.license_type == LicenseType.CAMERA_ANALYTICS and self.analytics_enabled
+
+    @property
+    def has_extra_storage(self) -> bool:
+        """Verifica se inclui storage adicional."""
+        return (
+            self.license_type in (LicenseType.CAMERA_STORAGE, LicenseType.CAMERA_ANALYTICS)
+            and self.storage_limit_gb is not None
+        )
+
+
+@dataclass
+class LicenseValidation:
+    """Resultado da validação de licença."""
+
+    is_valid: bool
+    license: License | None = None
+    reason: str = ""
+
+    @property
+    def error_message(self) -> str:
+        if self.is_valid:
+            return ""
+        return f"Licença inválida: {self.reason}"

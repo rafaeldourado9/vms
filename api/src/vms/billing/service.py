@@ -1,100 +1,116 @@
-"""Serviço de faturamento e validação de quotas."""
+"""Serviço de licenciamento — validação e gestão por câmera."""
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
 from uuid import UUID, uuid4
 
-from vms.billing.domain import BillingPlan, QuotaExceeded, QuotaStatus, UsageRecord
-from vms.billing.repository import BillingRepository, BillingRepositoryPort
-from vms.shared.events import DomainEvent
+from vms.billing.domain import (
+    License,
+    LicenseCreated,
+    LicenseExpired,
+    LicenseStatus,
+    LicenseType,
+    LicenseValidation,
+)
+from vms.billing.repository import LicenseRepository, LicenseRepositoryPort
+from vms.shared.kernel import BillingId, TenantId
 
 logger = logging.getLogger(__name__)
 
 
-class QuotaChecker:
-    """Verifica limites de quota para um tenant."""
+class LicenseService:
+    """Orquestra licenciamento por câmera."""
 
-    def __init__(self, plan: BillingPlan, current_usage: dict[str, float]) -> None:
-        self._plan = plan
-        self._usage = current_usage
-
-    def check_camera_quota(self) -> QuotaStatus:
-        """Verifica limite de câmeras."""
-        used = self._usage.get("cameras", 0)
-        return QuotaStatus(
-            metric_name="cameras",
-            used=used,
-            limit=self._plan.max_cameras,
-        )
-
-    def check_storage_quota(self) -> QuotaStatus:
-        """Verifica limite de armazenamento."""
-        used_bytes = self._usage.get("storage_bytes", 0)
-        limit_bytes = self._plan.storage_limit_gb * 1_000_000_000 if self._plan.storage_limit_gb else None
-        return QuotaStatus(
-            metric_name="storage",
-            used=used_bytes,
-            limit=limit_bytes,
-            unit="bytes",
-        )
-
-    def check_events_quota(self) -> QuotaStatus:
-        """Verifica limite de eventos mensais."""
-        used = self._usage.get("events_month", 0)
-        return QuotaStatus(
-            metric_name="events_month",
-            used=used,
-            limit=self._plan.max_events_per_month,
-        )
-
-    def check_all_quotas(self) -> list[QuotaStatus]:
-        """Verifica todas as quotas e retorna status."""
-        return [
-            self.check_camera_quota(),
-            self.check_storage_quota(),
-            self.check_events_quota(),
-        ]
-
-    def can_create_camera(self) -> bool:
-        """Verifica se pode criar nova câmera."""
-        status = self.check_camera_quota()
-        return status.is_unlimited or not status.is_exceeded
-
-    def can_record(self) -> bool:
-        """Verifica se pode gravar (storage disponível)."""
-        status = self.check_storage_quota()
-        return status.is_unlimited or not status.is_exceeded
-
-
-class BillingService:
-    """Orquestra faturamento e quotas."""
-
-    def __init__(self, repo: BillingRepositoryPort) -> None:
+    def __init__(self, repo: LicenseRepositoryPort) -> None:
         self._repo = repo
 
-    async def get_plan(self, slug: str) -> BillingPlan | None:
-        return await self._repo.get_plan_by_slug(slug)
+    async def create_license(
+        self,
+        tenant_id: str,
+        camera_id: str | None = None,
+        license_type: LicenseType = LicenseType.CAMERA_ONLY,
+        duration_days: int = 365,
+        storage_limit_gb: int | None = None,
+        analytics_enabled: bool = False,
+    ) -> License:
+        """
+        Cria nova licença para câmera.
 
-    async def list_plans(self) -> list[BillingPlan]:
-        return await self._repo.list_active_plans()
+        Args:
+            tenant_id: ID do tenant
+            camera_id: ID da câmera (None = licença avulsa para ativar depois)
+            license_type: Tipo de licença
+            duration_days: Validade em dias (default: 1 ano)
+            storage_limit_gb: Limite de storage extra (para CAMERA_STORAGE/ANALYTICS)
+            analytics_enabled: Habilitar analytics (para CAMERA_ANALYTICS)
+        """
+        expires_at = datetime.utcnow() + timedelta(days=duration_days)
 
-    async def record_daily_usage(self, tenant_id: str, usage: dict[str, float]) -> None:
-        """Registra uso diário do tenant."""
-        now = datetime.now(timezone.utc)
-        period_end = now.replace(hour=23, minute=59, second=59)
-        period_start = now.replace(hour=0, minute=0, second=0)
+        license = License(
+            id=BillingId(uuid4()),
+            tenant_id=TenantId(tenant_id),
+            camera_id=camera_id,
+            license_type=license_type,
+            storage_limit_gb=storage_limit_gb if license_type != LicenseType.CAMERA_ONLY else None,
+            analytics_enabled=analytics_enabled if license_type == LicenseType.CAMERA_ANALYTICS else False,
+            expires_at=expires_at,
+        )
 
-        for metric, value in usage.items():
-            record = UsageRecord(
-                id=uuid4(),
-                tenant_id=tenant_id,
-                metric_name=metric,
-                value=value,
-                period_start=period_start,
-                period_end=period_end,
-            )
-            await self._repo.record_usage(record)
+        created = await self._repo.create(license)
 
-    def create_checker(self, plan: BillingPlan, current_usage: dict[str, float]) -> QuotaChecker:
-        return QuotaChecker(plan, current_usage)
+        # Registrar evento de domínio
+        created.record_event(LicenseCreated(
+            license_id=created.id,
+            tenant_id=created.tenant_id,
+            camera_id=created.camera_id,
+            license_type=created.license_type,
+        ))
+
+        logger.info(
+            "Licença criada: type=%s camera=%s tenant=%s expires=%s",
+            license_type,
+            camera_id,
+            tenant_id,
+            expires_at.isoformat(),
+        )
+
+        return created
+
+    async def validate_camera(self, camera_id: str, tenant_id: str) -> LicenseValidation:
+        """Valida se câmera tem licença ativa."""
+        return await self._repo.validate_camera(camera_id, tenant_id)
+
+    async def check_analytics_allowed(self, camera_id: str, tenant_id: str) -> bool:
+        """Verifica se câmera pode usar analytics."""
+        validation = await self.validate_camera(camera_id, tenant_id)
+        if not validation.is_valid:
+            return False
+        return validation.license.has_analytics if validation.license else False
+
+    async def get_tenant_license_summary(self, tenant_id: str) -> dict:
+        """Retorna resumo de licenças do tenant."""
+        licenses = await self._repo.get_active_by_tenant(tenant_id)
+        count = await self._repo.count_active_by_tenant(tenant_id)
+
+        by_type = {}
+        for lic in licenses:
+            t = lic.license_type
+            by_type[t] = by_type.get(t, 0) + 1
+
+        return {
+            "total_active": count,
+            "by_type": by_type,
+            "licenses": [
+                {
+                    "id": str(l.id),
+                    "camera_id": l.camera_id,
+                    "type": l.license_type,
+                    "status": l.status,
+                    "expires_at": l.expires_at.isoformat() if l.expires_at else None,
+                    "has_analytics": l.has_analytics,
+                    "storage_gb": l.storage_limit_gb,
+                }
+                for l in licenses
+            ],
+        }
