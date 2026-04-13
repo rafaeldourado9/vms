@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { ShieldAlert, RefreshCw, Camera, SlidersHorizontal } from 'lucide-react'
+import { useNavigate } from 'react-router-dom'
+import { ShieldAlert, RefreshCw, Camera, SlidersHorizontal, Film } from 'lucide-react'
 import { clsx } from 'clsx'
 import { analyticsService, type AnalyticsEvent } from '@/services/analytics'
+import { PLUGIN_NAMES } from '@/constants/plugins'
 
 const SEVERITY_STYLE: Record<string, string> = {
   critical: 'bg-red-500/10 text-red-400 border-red-500/30',
@@ -15,16 +17,6 @@ const SEVERITY_LABEL: Record<string, string> = {
   info:     'Info',
 }
 
-const PLUGIN_NAMES: Record<string, string> = {
-  fire_smoke:      'Fire & Smoke',
-  ppe_detection:   'PPE / EPIs',
-  biker_detection: 'Capacete Moto',
-  horse_cart:      'Cavalo/Carroça',
-  intrusion:       'Intrusão',
-  people_count:    'Contagem Pessoas',
-  vehicle_count:   'Contagem Veíc.',
-  lpr:             'Placa (LPR)',
-}
 
 function fmtTime(iso: string) {
   return new Date(iso).toLocaleString('pt-BR', {
@@ -34,11 +26,14 @@ function fmtTime(iso: string) {
 }
 
 export function AnalyticsEvents() {
+  const navigate = useNavigate()
   const [events, setEvents]           = useState<AnalyticsEvent[]>([])
   const [loading, setLoading]         = useState(true)
   const [filterSeverity, setFilterSev] = useState('all')
   const [filterPlugin, setFilterPlug] = useState('all')
   const [autoRefresh, setAutoRefresh] = useState(true)
+  const [sseConnected, setSseConnected] = useState(false)
+  const evtSourceRef = useRef<EventSource | null>(null)
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
   const load = useCallback(async () => {
@@ -62,14 +57,83 @@ export function AnalyticsEvents() {
     load()
   }, [load])
 
-  // Auto-refresh
+  // SSE connection for real-time events
+  useEffect(() => {
+    if (!autoRefresh) {
+      setSseConnected(false)
+      if (evtSourceRef.current) {
+        evtSourceRef.current.close()
+        evtSourceRef.current = null
+      }
+      return
+    }
+
+    try {
+      // Tenta conectar SSE
+      const token = localStorage.getItem('vms_access_token')
+      const url = `/api/v1/sse?token=${encodeURIComponent(token || '')}`
+      const evtSource = new EventSource(url)
+
+      evtSource.onopen = () => {
+        setSseConnected(true)
+      }
+
+      evtSource.onmessage = (e) => {
+        try {
+          const data = JSON.parse(e.data)
+          if (data.event?.startsWith('analytics.') || data.event_type?.startsWith('analytics.')) {
+            // Novo evento analytics recebido via SSE — adiciona no topo da lista
+            setEvents(prev => {
+              const newEvent: AnalyticsEvent = {
+                id: crypto.randomUUID(),
+                plugin_id: data.event_type?.split('.')[0] || 'unknown',
+                camera_id: data.camera_id || '',
+                camera_name: '',
+                event_type: data.event_type || data.event,
+                severity: data.severity || 'info',
+                confidence: data.confidence,
+                payload: data.data || data.payload || {},
+                occurred_at: data.occurred_at || new Date().toISOString(),
+                created_at: new Date().toISOString(),
+              }
+              return [newEvent, ...prev].slice(0, 200)
+            })
+          }
+        } catch {
+          // ignora erro de parse
+        }
+      }
+
+      evtSource.onerror = () => {
+        setSseConnected(false)
+        // Fallback: reconectar após 10s
+        evtSource.close()
+        setTimeout(() => {
+          // O effect vai reconectar automaticamente
+        }, 10000)
+      }
+
+      evtSourceRef.current = evtSource
+
+      return () => {
+        evtSource.close()
+        evtSourceRef.current = null
+        setSseConnected(false)
+      }
+    } catch {
+      // SSE não suportado — fallback para polling
+      setSseConnected(false)
+    }
+  }, [autoRefresh])
+
+  // Auto-refresh fallback (polling) se SSE falhar
   useEffect(() => {
     if (intervalRef.current) clearInterval(intervalRef.current)
-    if (autoRefresh) {
+    if (autoRefresh && !sseConnected) {
       intervalRef.current = setInterval(load, 5000)
     }
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
-  }, [autoRefresh, load])
+  }, [autoRefresh, sseConnected, load])
 
   const criticalCount = events.filter(e => e.severity === 'critical').length
   const warningCount  = events.filter(e => e.severity === 'warning').length
@@ -90,6 +154,12 @@ export function AnalyticsEvents() {
           </div>
           <p className="text-xs text-t3">
             {events.length} eventos · {warningCount} avisos
+            {sseConnected && (
+              <span className="ml-2 flex items-center gap-1 text-green-400">
+                <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                SSE
+              </span>
+            )}
             {autoRefresh && <span className="text-accent ml-2">• ao vivo</span>}
           </p>
         </div>
@@ -168,13 +238,14 @@ export function AnalyticsEvents() {
               <th className="text-left px-4 py-3 text-xs text-t3 font-medium">Evento</th>
               <th className="text-left px-4 py-3 text-xs text-t3 font-medium">Confiança</th>
               <th className="text-left px-4 py-3 text-xs text-t3 font-medium">Horário</th>
+              <th className="px-4 py-3" />
             </tr>
           </thead>
           <tbody>
             {loading ? (
               Array.from({ length: 6 }).map((_, i) => (
                 <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                  {Array.from({ length: 6 }).map((__, j) => (
+                  {Array.from({ length: 7 }).map((__, j) => (
                     <td key={j} className="px-4 py-3">
                       <div className="h-3 rounded animate-pulse" style={{ background: 'var(--elevated)', width: '70%' }} />
                     </td>
@@ -183,7 +254,7 @@ export function AnalyticsEvents() {
               ))
             ) : events.length === 0 ? (
               <tr>
-                <td colSpan={6} className="px-4 py-12 text-center text-sm text-t3">
+                <td colSpan={7} className="px-4 py-12 text-center text-sm text-t3">
                   Nenhuma detecção encontrada
                 </td>
               </tr>
@@ -221,6 +292,18 @@ export function AnalyticsEvents() {
                   )}
                 </td>
                 <td className="px-4 py-3 text-t3 text-xs tabular-nums">{fmtTime(ev.occurred_at)}</td>
+                <td className="px-4 py-3">
+                  <button
+                    onClick={() => navigate(
+                      `/recordings?camera_id=${ev.camera_id}&date=${ev.occurred_at.split('T')[0]}`
+                    )}
+                    className="flex items-center gap-1 text-[11px] text-t3 hover:text-accent transition-colors"
+                    title="Ver gravação deste horário"
+                  >
+                    <Film size={11} />
+                    Gravação
+                  </button>
+                </td>
               </tr>
             ))}
           </tbody>

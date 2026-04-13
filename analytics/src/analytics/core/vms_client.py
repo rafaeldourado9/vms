@@ -130,3 +130,30 @@ class VMSClient:
         except httpx.HTTPError:
             logger.exception("Erro ao enviar evento de plugin para o VMS")
             return False
+
+    async def get_active_plugins_for_camera(self, camera_id: str) -> list[str]:
+        """
+        Busca plugins ativos para uma câmera específica.
+
+        Retorna lista de nomes de plugins com status='running' para esta câmera.
+        Se o endpoint não existir ou falhar, retorna lista vazia (fallback: todos ativos).
+        """
+        if not self._client:
+            return []
+
+        try:
+            resp = await self._client.get(
+                f"/api/v1/plugins/cameras/{camera_id}/active-plugins"
+            )
+            if resp.status_code == 404:
+                # Endpoint não existe — fallback: todos os plugins ativos
+                return []
+            resp.raise_for_status()
+            data = resp.json()
+            return data.get("active_plugins", [])
+        except httpx.HTTPError:
+            logger.debug(
+                "Erro ao buscar plugins ativos para câmera %s (fallback: todos ativos)",
+                camera_id,
+            )
+            return []

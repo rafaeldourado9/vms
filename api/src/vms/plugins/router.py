@@ -158,6 +158,24 @@ async def ingest_plugin_event(
         occurred_at=body.occurred_at,
         payload=body.payload,
     )
+
+    # Publicar no canal SSE do tenant para frontend em tempo real
+    try:
+        from vms.infrastructure.messaging.event_bus import publish_event
+        severity = body.payload.get("severity", "info") if body.payload else "info"
+        await publish_event(
+            "analytics.event",
+            {
+                "event_type": body.event_type,
+                "camera_id": body.camera_id,
+                "severity": severity,
+                "confidence": body.confidence,
+                "occurred_at": body.occurred_at,
+            },
+            tenant_id=tenant_id,
+        )
+    except Exception:
+        logger.debug("Falha ao publicar SSE para evento analytics (não crítico)", exc_info=True)
     # Também cria AnalyticsEvent para aparecer no dashboard
     try:
         from datetime import datetime, timezone
@@ -215,3 +233,96 @@ async def list_plugin_rois(
         }
         for r in rois
     ]
+
+
+@router.get(
+    "/plugins/cameras/{camera_id}/active-plugins",
+    summary="Plugins ativos para uma câmera",
+)
+async def get_active_plugins_for_camera(
+    camera_id: str,
+    api_key: ApiKeyHeader,
+    db: DbSession,
+) -> dict:
+    """
+    Retorna lista de plugins com status='running' para uma câmera específica.
+
+    Usa as ROIs configuradas para determinar quais plugins estão ativos.
+    Se não houver ROIs, retorna todos os plugins conhecidos (fallback).
+    """
+    tenant_id = await _resolve_plugin_tenant(api_key, db)
+
+    from sqlalchemy import select
+    from vms.analytics.models import AnalyticsROI, PluginInstallation
+
+    # Buscar ROIs ativas para esta câmera
+    stmt = select(AnalyticsROI.plugin_id).where(
+        AnalyticsROI.tenant_id == tenant_id,
+        AnalyticsROI.camera_id == camera_id,
+        AnalyticsROI.is_active.is_(True),
+    )
+    result = await db.execute(stmt)
+    roi_plugin_ids = [row[0] for row in result.all()]
+
+    # Buscar instalações com status='running'
+    install_stmt = select(PluginInstallation.plugin_id).where(
+        PluginInstallation.tenant_id == tenant_id,
+        PluginInstallation.status == "running",
+    )
+    install_result = await db.execute(install_stmt)
+    running_plugins = [row[0] for row in install_result.all()]
+
+    # Interseção: plugins que têm ROI E estão rodando
+    if roi_plugin_ids:
+        active_plugins = list(set(roi_plugin_ids) & set(running_plugins))
+    else:
+        # Sem ROIs — fallback: todos os plugins rodando
+        active_plugins = running_plugins
+
+    return {"camera_id": camera_id, "active_plugins": active_plugins}
+
+
+# ─── LGPD: Face Recognition ──────────────────────────────────────────────────
+
+@router.post(
+    "/plugins/cameras/{camera_id}/face-recognition/consent",
+    summary="Registrar consentimento LGPD para face recognition",
+)
+async def register_face_recognition_consent(
+    camera_id: str,
+    api_key: ApiKeyHeader,
+    db: DbSession,
+) -> dict:
+    """
+    Registra consentimento explícito para reconhecimento facial (LGPD Art. 11).
+
+    Body esperado: {"consent": true, "tenant_id": "..."}
+    """
+    from fastapi import Body
+    body = await Body()
+    consent = body.get("consent", False)
+    tenant_id = body.get("tenant_id")
+
+    if not tenant_id:
+        tenant_id = await _resolve_plugin_tenant(api_key, db)
+
+    from vms.iam.models import TenantModel
+    from sqlalchemy import update as sa_update
+    from datetime import datetime, timezone
+
+    stmt = (
+        sa_update(TenantModel)
+        .where(TenantModel.id == tenant_id)
+        .values(
+            facial_recognition_enabled=consent,
+            facial_recognition_consent_at=datetime.now(timezone.utc) if consent else None,
+        )
+    )
+    await db.execute(stmt)
+    await db.flush()
+
+    return {
+        "camera_id": camera_id,
+        "tenant_id": tenant_id,
+        "consent_registered": consent,
+    }

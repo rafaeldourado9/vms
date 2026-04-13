@@ -36,15 +36,37 @@ class PeopleCountPlugin(YOLOPlugin):
         metadata: FrameMetadata,
         rois: list[ROIConfig],
     ) -> list[AnalyticsResult]:
-        """Processa frame para contagem de pessoas em cada ROI."""
-        results: list[AnalyticsResult] = []
-
+        """Processa frame para contagem de pessoas (modo standalone)."""
         min_conf = min(
             (roi.config.get("min_confidence", 0.5) for roi in rois),
             default=0.5,
         )
-
         detections = self.detect(frame, conf=min_conf, classes=[0])
+        return self._process_detections(detections, rois, metadata, min_conf)
+
+    async def process_shared_frame(
+        self,
+        detections: list[dict],
+        frame: np.ndarray,
+        metadata: FrameMetadata,
+        rois: list[ROIConfig],
+    ) -> list[AnalyticsResult]:
+        """Processa frame com detecções pré-computadas (shared inference)."""
+        min_conf = min(
+            (roi.config.get("min_confidence", 0.5) for roi in rois),
+            default=0.5,
+        )
+        return self._process_detections(detections, rois, metadata, min_conf)
+
+    def _process_detections(
+        self,
+        detections: list[dict],
+        rois: list[ROIConfig],
+        metadata: FrameMetadata,
+        min_conf: float,
+    ) -> list[AnalyticsResult]:
+        """Lógica comum de processamento de detecções."""
+        results: list[AnalyticsResult] = []
 
         if not detections:
             return results

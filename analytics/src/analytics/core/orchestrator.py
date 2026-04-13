@@ -16,10 +16,19 @@ from analytics.core.plugin_base import (
     FrameMetadata,
     ROIConfig,
 )
+from analytics.core.shared_inference import (
+    PLUGIN_CLASSES,
+    SharedInferenceEngine,
+)
 from analytics.core.vms_client import VMSClient
 from analytics.core.zones import load_zones_config  # fallback local
 
 logger = logging.getLogger(__name__)
+
+# Modelos que podem ser compartilhados entre plugins
+SHARED_MODELS = {
+    "object.pt": {"intrusion", "people_count", "vehicle_count", "lpr", "biker_detection"},
+}
 
 
 class Orchestrator:
@@ -37,6 +46,8 @@ class Orchestrator:
 
     def __init__(self) -> None:
         self._plugins: list[AnalyticsPlugin] = []
+        self._shared_engines: dict[str, SharedInferenceEngine] = {}
+        self._plugin_uses_shared: dict[str, str] = {}  # plugin_name -> engine_name
         self._vms_client = VMSClient()
         self._running = False
         self._tasks: list[asyncio.Task[None]] = []
@@ -63,7 +74,7 @@ class Orchestrator:
                         isinstance(attr, type)
                         and issubclass(attr, AnalyticsPlugin)
                         and attr is not AnalyticsPlugin
-                        and not getattr(attr, "__abstractmethods__", set())  # Pula classes abstratas
+                        and not getattr(attr, "__abstractmethods__", set())
                     ):
                         plugin = attr()
                         config: dict[str, Any] = {
@@ -92,6 +103,55 @@ class Orchestrator:
                         )
             except Exception:
                 logger.exception("Erro ao carregar plugin %s", name)
+
+        # Criar shared inference engines para plugins que compartilham modelo
+        await self._build_shared_engines(settings)
+
+    async def _build_shared_engines(self, settings: Any) -> None:
+        """
+        Cria SharedInferenceEngine para modelos compartilhados.
+
+        Plugins que usam o mesmo modelo (ex: object.pt) compartilham
+        uma única engine. A união de todas as classes necessárias
+        é computada para maximizar eficiência.
+        """
+        # Determinar quais plugins podem usar shared inference
+        model_path = settings.yolo_model_path
+        model_key = model_path.split("/")[-1]  # "object.pt"
+
+        if model_key in SHARED_MODELS:
+            plugin_names = SHARED_MODELS[model_key]
+            # Filtrar apenas plugins que foram carregados
+            loaded_plugin_names = {p.name for p in self._plugins}
+            active_plugin_names = plugin_names & loaded_plugin_names
+
+            if active_plugin_names:
+                # Unir todas as classes necessárias
+                all_classes: set[int] = set()
+                for pname in active_plugin_names:
+                    all_classes |= PLUGIN_CLASSES.get(pname, set())
+
+                engine = SharedInferenceEngine(
+                    model_path=model_path,
+                    imgsz=settings.yolo_imgsz,
+                    name=f"shared:{model_key}",
+                )
+                engine_key = f"shared:{model_key}"
+                self._shared_engines[engine_key] = engine
+                logger.info(
+                    "Shared engine criada para %s: %d classes (%s) para plugins: %s",
+                    model_key,
+                    len(all_classes),
+                    sorted(all_classes),
+                    sorted(active_plugin_names),
+                )
+
+                # Registrar quais plugins usam esta engine
+                for pname in active_plugin_names:
+                    self._plugin_uses_shared[pname] = engine_key
+
+                # Armazenar classes unidas na engine para acesso rápido
+                engine._all_classes = all_classes  # type: ignore[attr-defined]
 
     async def start(self) -> None:
         """Descobre câmeras via VMS API e inicia captura."""
@@ -215,6 +275,39 @@ class Orchestrator:
             logger.error("Não foi possível abrir câmera %s: %s", camera_id, rtsp_url)
             return
 
+        # Separar plugins que usam shared inference vs standalone
+        shared_plugins: list[AnalyticsPlugin] = []
+        standalone_plugins: list[AnalyticsPlugin] = []
+        for plugin in self._plugins:
+            if plugin.name in self._plugin_uses_shared:
+                shared_plugins.append(plugin)
+            else:
+                standalone_plugins.append(plugin)
+
+        # Buscar plugins ativos para esta câmera (filtro por PluginInstallation)
+        active_plugin_names = await self._vms_client.get_active_plugins_for_camera(
+            camera_id
+        )
+        # Se API retornar vazio (endpoint não existe ou falha), usar todos os plugins
+        use_plugin_filter = len(active_plugin_names) > 0
+
+        def is_plugin_active(plugin_name: str) -> bool:
+            if not use_plugin_filter:
+                return True
+            return plugin_name in active_plugin_names
+
+        # Filtrar plugins ativos
+        shared_plugins = [p for p in shared_plugins if is_plugin_active(p.name)]
+        standalone_plugins = [p for p in standalone_plugins if is_plugin_active(p.name)]
+
+        if not shared_plugins and not standalone_plugins:
+            logger.debug(
+                "Nenhum plugin ativo para câmera %s — pulando processamento",
+                camera_id,
+            )
+            source.close()
+            return
+
         try:
             while self._running:
                 frame = source.read()
@@ -229,14 +322,52 @@ class Orchestrator:
                     stream_url=rtsp_url,
                 )
 
-                for plugin in self._plugins:
+                # 1. Shared inference: 1 inferência → múltiplos plugins
+                if shared_plugins and self._shared_engines:
+                    # Pegar a primeira engine compartilhada (assumimos 1 modelo compartilhado)
+                    engine_key = next(iter(self._shared_engines))
+                    engine = self._shared_engines[engine_key]
+                    all_classes = getattr(engine, "_all_classes", set())
+
+                    # Executar inferência UNA
+                    shared_detections = engine.predict(
+                        frame,
+                        classes=all_classes,
+                        conf=0.30,
+                    )
+
+                    # Distribuir para cada plugin (cada um filtra suas classes)
+                    for plugin in shared_plugins:
+                        try:
+                            plugin_classes = PLUGIN_CLASSES.get(plugin.name, set())
+                            plugin_detections = engine.filter_by_class(
+                                shared_detections,
+                                plugin_classes,
+                            )
+                            results = await plugin.process_shared_frame(
+                                plugin_detections,
+                                frame,
+                                metadata,
+                                zones,
+                            )
+                            for result in results:
+                                await self._send_result(result)
+                        except Exception:
+                            logger.exception(
+                                "Erro no plugin shared %s para câmera %s",
+                                plugin.name,
+                                camera_id,
+                            )
+
+                # 2. Standalone inference: plugins com modelo próprio
+                for plugin in standalone_plugins:
                     try:
                         results = await plugin.process_frame(frame, metadata, zones)
                         for result in results:
                             await self._send_result(result)
                     except Exception:
                         logger.exception(
-                            "Erro no plugin %s para câmera %s",
+                            "Erro no plugin standalone %s para câmera %s",
                             plugin.name,
                             camera_id,
                         )

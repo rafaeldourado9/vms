@@ -120,6 +120,39 @@ services:
         condition: service_healthy
     networks: [vms]
 
+  # ─── Analytics Service (IA em tempo real) ───────────────────────────────────
+  analytics:
+    build:
+      context: ./analytics
+      target: production
+    restart: unless-stopped
+    environment:
+      - VMS_API_URL=http://api:8000
+      - VMS_API_KEY=${VMS_API_KEY:-dev-analytics-key}
+      - MEDIAMTX_HOST=mediamtx
+      - REDIS_URL=redis://redis:6379/1
+      - ANALYTICS_FPS=1
+      - YOLO_IMGSZ=640
+      - YOLO_CONF=0.30
+      - FIRE_SMOKE_MODEL_PATH=/models/fire.pt
+      - PPE_MODEL_PATH=/models/ppe.pt
+      - BIKER_MODEL_PATH=/models/biker_2.pt
+      - HORSE_CART_MODEL_PATH=/models/horse_cart.pt
+      - YOLO_MODEL_PATH=/models/object.pt
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - ./analytics/models:/models:ro
+    depends_on:
+      - api
+      - mediamtx
+      - redis
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    networks: [vms]
+
   # ─── Frontend ─────────────────────────────────────────────────────────────
   frontend:
     build:

@@ -25,7 +25,8 @@ class FireSmokePlugin(YOLOPlugin):
 
         model_path = config.get("model_path", "/models/fire.pt")
         imgsz = config.get("imgsz", 640)
-        self._model = YOLO(model_path)
+        self._model = YOLO(model_path)1[
+        ]
         self._imgsz = imgsz
         self._conf = config.get("conf", 0.40)
         logger.info("FireSmokePlugin: modelo carregado de %s", model_path)

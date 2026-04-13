@@ -23,8 +23,15 @@ RUN mkdir -p src && pip install --no-cache-dir .
 # ─── Produção GPU (CUDA) ───────────────────────────────────────────────────
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS gpu
 
-# Instalar Python e dependências do sistema
+ENV DEBIAN_FRONTEND=noninteractive \
+    TZ=UTC
+
+# Instalar Python 3.12 via deadsnakes PPA (Ubuntu 22.04 não tem 3.12 no apt padrão)
 RUN apt-get update && apt-get install -y --no-install-recommends \
+    software-properties-common \
+    curl \
+    && add-apt-repository ppa:deadsnakes/ppa \
+    && apt-get update && apt-get install -y --no-install-recommends \
     python3.12 \
     python3.12-venv \
     libgl1 \
@@ -48,7 +55,7 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     --index-url https://download.pytorch.org/whl/cu124
 
 COPY pyproject.toml .
-RUN pip install --no-cache-dir .
+RUN mkdir -p src && pip install --no-cache-dir .
 
 COPY src/ src/
 
