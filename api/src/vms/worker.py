@@ -9,6 +9,7 @@ from arq.connections import RedisSettings
 from vms.core.config import get_settings
 from vms.recordings.tasks import task_cleanup_old_segments, task_index_segment
 from vms.notifications.tasks import task_dispatch_notification
+from vms.reports.tasks import task_generate_report
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,7 @@ class WorkerSettings:
         task_index_segment,
         task_cleanup_old_segments,
         task_dispatch_notification,
+        task_generate_report,
     ]
     on_startup = startup
     on_shutdown = shutdown

@@ -215,6 +215,7 @@ def _include_routers(app: FastAPI) -> None:
     from vms.analytics.router import router as analytics_router
     from vms.vod.router import router as vod_router
     from vms.audit.router import router as audit_router
+    from vms.reports.router import router as reports_router
 
     # Health — sem prefixo /api/v1
     app.include_router(health_router)
