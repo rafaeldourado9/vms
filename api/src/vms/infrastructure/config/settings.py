@@ -35,6 +35,8 @@ class Settings(BaseSettings):
     secret_key: str = Field(default="dev-secret-change-in-production")
     access_token_expire_minutes: int = Field(default=15)
     refresh_token_expire_days: int = Field(default=7)
+    cors_origins: str = Field(default="https://app.vms.io")  # Separado por vírgulas
+    encryption_key: str = Field(default="dev-encryption-key-change-in-production")  # Fernet key 32 bytes base64
 
     # ─── MediaMTX ─────────────────────────────────────────────────────────
     mediamtx_api_url: str = Field(default="http://localhost:9997")

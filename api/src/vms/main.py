@@ -166,9 +166,7 @@ def create_app() -> FastAPI:
     origins = (
         ["*"]
         if not settings.is_production
-        else [
-            "https://app.vms.io",
-        ]
+        else settings.cors_origins.split(",") if settings.cors_origins else ["https://app.vms.io"]
     )
     app.add_middleware(
         CORSMiddleware,
@@ -177,6 +175,10 @@ def create_app() -> FastAPI:
         allow_methods=["*"],
         allow_headers=["*"],
     )
+
+    # Correlation ID — request tracking e structured logging
+    from vms.infrastructure.middleware.correlation_id import CorrelationIdMiddleware
+    app.add_middleware(CorrelationIdMiddleware)
 
     # Handlers de exceção de domínio
     register_exception_handlers(app)

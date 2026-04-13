@@ -60,6 +60,11 @@ services:
     volumes:
       - ./infra/mediamtx/mediamtx.yml:/mediamtx.yml:ro
       - recordings:/recordings
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9997/v3/config/global/get"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks: [vms]
 
   # ─── API Service ──────────────────────────────────────────────────────────
@@ -118,6 +123,11 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import redis; r = redis.Redis(host='redis'); r.ping()"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks: [vms]
 
   # ─── Analytics Service (IA em tempo real) ───────────────────────────────────
@@ -178,6 +188,11 @@ services:
     depends_on:
       - api
       - frontend
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
     networks: [vms]
 
   # ─── Cloudflare Tunnel (dev — expõe API para webhooks externos) ──────────
@@ -214,6 +229,35 @@ services:
       postgres:
         condition: service_healthy
     profiles: [backup]               # `docker compose --profile backup run --rm backup`
+    networks: [vms]
+
+  # ─── Backup Scheduler (automático — roda diariamente às 3h) ─────────────
+  backup-scheduler:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    entrypoint: >
+      /bin/sh -c "
+        while true; do
+          echo '[$$(date)] Running backup...';
+          PGPASSWORD=$$PGPASSWORD pg_dump -h $$POSTGRES_HOST -p $$POSTGRES_PORT -U $$POSTGRES_USER -d $$POSTGRES_DB | gzip > /backups/vms-backup-$$(date +\%Y\%m\%d_\%H\%M\%S).sql.gz;
+          echo '[$$(date)] Backup completed';
+          find /backups -name 'vms-backup-*' -mtime +$$RETENTION_DAYS -delete;
+          echo '[$$(date)] Old backups cleaned';
+          sleep 86400;
+        done
+      "
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-vms}
+      - POSTGRES_USER=${POSTGRES_USER:-vms}
+      - PGPASSWORD=${POSTGRES_PASSWORD:-vmsdev}
+      - RETENTION_DAYS=${BACKUP_RETENTION_DAYS:-7}
+    volumes:
+      - backups:/backups
+    depends_on:
+      postgres:
+        condition: service_healthy
     networks: [vms]
 
 volumes:
