@@ -59,6 +59,9 @@ class IntelbrasNormalizer:
         if isinstance(events, list) and events:
             ev = events[0] if isinstance(events[0], dict) else {}
             plate = str(ev.get("LicensePlate") or ev.get("Plate") or "").upper().strip()
+            if not plate:
+                logger.debug("Intelbras normalizer: placa vazia, ignorando evento")
+                return None
             conf_raw = ev.get("Confidence", 0)
             try:
                 confidence = float(conf_raw) / (100.0 if float(conf_raw) > 1 else 1.0)

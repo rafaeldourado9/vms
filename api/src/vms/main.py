@@ -12,12 +12,12 @@ from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 
-from vms.core.config import get_settings
-from vms.core.database import close_db, create_engine, init_db
-from vms.core.event_bus import connect_event_bus, disconnect_event_bus
-from vms.core.exceptions import register_exception_handlers
-from vms.core.logging_config import setup_logging
-from vms.core.rate_limit import limiter
+from vms.infrastructure.config import get_settings
+from vms.infrastructure.database import close_db, create_engine, init_db
+from vms.infrastructure.exceptions import register_exception_handlers
+from vms.infrastructure.logging import setup_logging
+from vms.infrastructure.messaging import connect_event_bus, disconnect_event_bus
+from vms.shared.api.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -124,9 +124,16 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     app.state.arq_redis = aioredis.from_url(settings.redis_url)
     logger.info("Redis conectado")
 
-    # RabbitMQ
+    # Event Bus (Domain Events via Redis pub/sub)
     try:
         await connect_event_bus()
+        from vms.infrastructure.messaging import event_registry
+        from vms.infrastructure.messaging.event_handlers import (
+            register_all_events,
+            subscribe_all_handlers,
+        )
+        register_all_events(event_registry)
+        await subscribe_all_handlers(app.state.event_bus if hasattr(app.state, 'event_bus') else None)
     except Exception as exc:
         logger.warning("Event bus indisponível no startup: %s", exc)
 
@@ -204,6 +211,7 @@ def _include_routers(app: FastAPI) -> None:
     from vms.plugins.router import router as plugins_router
     from vms.webhooks_public.router import router as public_webhooks_router
     from vms.analytics.router import router as analytics_router
+    from vms.vod.router import router as vod_router
 
     # Health — sem prefixo /api/v1
     app.include_router(health_router)
@@ -234,6 +242,9 @@ def _include_routers(app: FastAPI) -> None:
 
     # Analytics — catálogo e eventos
     app.include_router(analytics_router, prefix="/api/v1")
+
+    # VOD — streaming de gravações
+    app.include_router(vod_router, prefix="/api/v1")
 
 
 app = create_app()

@@ -51,6 +51,9 @@ class HikvisionNormalizer:
             or ""
         )
         plate = str(plate).upper().strip()
+        if not plate:
+            logger.debug("Hikvision normalizer: placa vazia, ignorando evento")
+            return None
 
         # Confiança: 0–100 (int) → 0.0–1.0 (float)
         confidence_raw = anpr.get("confidence") or raw.get("confidence") or 0

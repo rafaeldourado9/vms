@@ -22,14 +22,17 @@ class GenericNormalizer:
     manufacturer: str = "generic"
 
     def can_handle(self, raw: dict) -> bool:
-        """Retorna True se o payload contiver a chave 'plate'."""
-        return "plate" in raw
+        """Retorna True se o payload contiver a chave 'plate' não vazia."""
+        plate = raw.get("plate")
+        return isinstance(plate, str) and bool(plate.strip())
 
     def normalize(
         self, raw: dict, camera_id: str, tenant_id: str
-    ) -> AlprDetection:
+    ) -> AlprDetection | None:
         """Extrai placa, confiança e timestamp do payload genérico."""
         plate = str(raw["plate"]).upper().strip()
+        if not plate:
+            return None
         confidence = float(raw.get("confidence", 0.0))
         timestamp = _parse_generic_datetime(raw.get("timestamp", ""))
         image_b64 = raw.get("image_b64")

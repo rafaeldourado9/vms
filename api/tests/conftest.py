@@ -31,7 +31,8 @@ import vms.events.models  # noqa: F401
 import vms.recordings.models  # noqa: F401
 import vms.notifications.models  # noqa: F401
 import vms.streaming.models  # noqa: F401
-import vms.analytics_config.models  # noqa: F401
+import vms.analytics.models  # noqa: F401
+import vms.vod.models  # noqa: F401
 
 
 # ─── Settings override para testes ────────────────────────────────────────────

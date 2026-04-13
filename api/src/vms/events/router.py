@@ -60,9 +60,10 @@ async def webhook_alpr_generic(
     redis: Redis = Depends(_get_redis),
 ) -> dict:
     """Recebe detecção ALPR no formato normalizado."""
+    tenant_id = await _resolve_tenant(body.camera_id)
     detection = AlprDetection(
         camera_id=body.camera_id,
-        tenant_id=_resolve_tenant(body.camera_id),
+        tenant_id=tenant_id,
         plate=body.plate.upper(),
         confidence=body.confidence,
         manufacturer="generic",
@@ -287,8 +288,15 @@ async def _resolve_live_path(path: str, db) -> tuple[str, str] | None:
     return camera.tenant_id, camera.id
 
 
-def _resolve_tenant(camera_id: str) -> str:
-    """Placeholder — em produção, busca tenant_id via repositório."""
-    # No webhook genérico o tenant deve ser resolvido via câmera
-    # Esta função é sobrescrita no contexto real com injeção de dependência
+async def _resolve_tenant(camera_id: str) -> str:
+    """Resolve tenant_id a partir do camera_id via repositório."""
+    from vms.cameras.repository import CameraRepository
+    from vms.core.database import get_session_factory
+
+    factory = get_session_factory()
+    async with factory() as session:
+        repo = CameraRepository(session)
+        camera = await repo.get_by_id(camera_id)
+        if camera:
+            return camera.tenant_id
     return "unknown"

@@ -318,6 +318,15 @@ async def _store_event(
         return event
 
 
+async def _publish_sse(tenant_id: str, event_type: str, data: dict) -> None:
+    """Publica evento no canal SSE do tenant."""
+    try:
+        from vms.infrastructure.messaging.event_bus import publish_event
+        await publish_event(event_type, data, tenant_id=tenant_id)
+    except Exception as exc:
+        logger.debug("Falha ao publicar SSE (não crítico): %s", exc)
+
+
 # ─── Hikvision ───────────────────────────────────────────────────────────────
 
 @router.post(
@@ -387,6 +396,13 @@ async def hikvision_webhook(
                 plate=detection.plate,
                 confidence=detection.confidence,
             )
+            # Publica SSE para frontend
+            await _publish_sse(tenant_id, "alpr.detected", {
+                "plate": detection.plate,
+                "confidence": detection.confidence,
+                "camera_id": cam_id,
+                "event_id": str(event.id) if event else None,
+            })
             logger.info("ANPR Hikvision | placa=%s camera=%s", detection.plate, cam_id)
             return {"ok": True, "event_id": str(event.id) if event else None}
         except Exception as exc:
@@ -400,6 +416,11 @@ async def hikvision_webhook(
         event_type = f"hikvision_{body['EventNotificationAlert']['eventType']}"
 
     event = await _store_event(tenant_id, cam_id, event_type=event_type, payload=body)
+    # Publica SSE para evento genérico
+    await _publish_sse(tenant_id, event_type, {
+        "camera_id": cam_id,
+        "event_id": str(event.id) if event else None,
+    })
     return {"ok": True, "event_id": str(event.id) if event else None}
 
 
@@ -453,6 +474,13 @@ async def intelbras_webhook(
                 plate=detection.plate,
                 confidence=detection.confidence,
             )
+            # Publica SSE para frontend
+            await _publish_sse(tenant_id, "alpr.detected", {
+                "plate": detection.plate,
+                "confidence": detection.confidence,
+                "camera_id": cam_id,
+                "event_id": str(event.id) if event else None,
+            })
             logger.info("ANPR Intelbras | placa=%s camera=%s", detection.plate, cam_id)
             return {"ok": True, "event_id": str(event.id) if event else None}
         except Exception as exc:
@@ -470,6 +498,12 @@ async def intelbras_webhook(
         plate=str(plate) if plate else None,
         confidence=float(confidence) if confidence else None,
     )
+    # Publica SSE para evento genérico
+    await _publish_sse(tenant_id, event_type, {
+        "camera_id": cam_id,
+        "plate": plate,
+        "event_id": str(event.id) if event else None,
+    })
     return {"ok": True, "event_id": str(event.id) if event else None}
 
 
@@ -507,6 +541,14 @@ async def generic_camera_webhook(
                     plate=detection.plate,
                     confidence=detection.confidence,
                 )
+                # Publica SSE para frontend
+                await _publish_sse(tenant_id, "alpr.detected", {
+                    "plate": detection.plate,
+                    "confidence": detection.confidence,
+                    "camera_id": cam_id,
+                    "manufacturer": mfr,
+                    "event_id": str(event.id) if event else None,
+                })
                 return {"ok": True, "manufacturer": mfr, "event_id": str(event.id) if event else None}
             except Exception as exc:
                 logger.error("Erro ao normalizar %s: %s", mfr, exc)
@@ -522,4 +564,10 @@ async def generic_camera_webhook(
         plate=str(plate) if plate else None,
         confidence=float(confidence) if confidence else None,
     )
+    # Publica SSE para evento genérico
+    await _publish_sse(tenant_id, f"camera_{event_type}", {
+        "camera_id": cam_id,
+        "plate": plate,
+        "event_id": str(event.id) if event else None,
+    })
     return {"ok": True, "event_id": str(event.id) if event else None}

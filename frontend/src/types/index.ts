@@ -178,6 +178,26 @@ export interface AnalyticsSummary {
   by_camera: Record<string, number>
 }
 
+// ─── VOD (Video on Demand) ──────────────────────────────────────────────────
+
+export interface VODStream {
+  id: string
+  tenant_id: string
+  camera_id: string
+  started_at: string
+  ended_at: string
+  playlist_path: string
+  status: 'pending' | 'generating' | 'ready' | 'failed'
+  error: string | null
+  created_at: string
+}
+
+export interface VODPlaylistURL {
+  playlist_url: string
+  status: string
+  stream_id: string
+}
+
 // ─── Pagination ──────────────────────────────────────────────────────────────
 
 export interface PaginatedResponse<T> {

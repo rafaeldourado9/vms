@@ -1,11 +1,13 @@
-"""Rate limiter compartilhado — singleton usado por main.py e routers."""
+"""
+⚠️ DEPRECATED: vms.core.rate_limit foi movido para vms.shared.api.rate_limit
 
-import os
+Este módulo existe apenas para compatibilidade durante a migração.
+Todos os imports devem ser atualizados para:
+    from vms.shared.api.rate_limit import limiter
 
-from slowapi import Limiter
-from slowapi.util import get_remote_address
+Este arquivo será removido na Sprint A3.
+"""
+# Compatibilidade — redireciona para novo local
+from vms.shared.api.rate_limit import limiter  # noqa: F401
 
-limiter = Limiter(
-    key_func=get_remote_address,
-    enabled=os.getenv("ENVIRONMENT", "production") != "testing",
-)
+__all__ = ["limiter"]

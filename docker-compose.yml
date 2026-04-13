@@ -81,6 +81,7 @@ services:
       - VMS_API_KEY=${VMS_API_KEY:-dev-analytics-key}
     volumes:
       - recordings:/recordings
+      - vod_streams:/tmp/vod
       - tunnel_data:/tunnel:ro
     depends_on:
       postgres:
@@ -119,36 +120,6 @@ services:
         condition: service_healthy
     networks: [vms]
 
-  # ─── Analytics Service (plugin standalone) ───────────────────────────────
-  analytics:
-    build:
-      context: ./analytics
-      target: production
-    restart: unless-stopped
-    environment:
-      - VMS_API_URL=http://api:8000
-      - VMS_API_KEY=${VMS_API_KEY:-dev-analytics-key}
-      - MEDIAMTX_HOST=mediamtx
-      - ANALYTICS_FPS=${ANALYTICS_FPS:-1}
-      - ANALYTICS_WORKERS=${ANALYTICS_WORKERS:-4}
-      - YOLO_IMGSZ=${YOLO_IMGSZ:-640}
-      - YOLO_CONF=${YOLO_CONF:-0.30}
-      - LOG_LEVEL=${LOG_LEVEL:-INFO}
-    volumes:
-      - recordings:/recordings
-      - ./analytics/models:/models:ro   # modelos YOLO pré-treinados
-    depends_on:
-      api:
-        condition: service_healthy
-    networks: [vms]
-    deploy:
-      resources:
-        reservations:
-          devices:
-            - driver: nvidia
-              count: 1
-              capabilities: [gpu]
-
   # ─── Frontend ─────────────────────────────────────────────────────────────
   frontend:
     build:
@@ -170,6 +141,7 @@ services:
       - ./infra/nginx/certs:/etc/nginx/certs:ro
       - ./infra/nginx/certbot:/var/www/certbot:ro
       - recordings:/recordings:ro
+      - vod_streams:/tmp/vod:ro
     depends_on:
       - api
       - frontend
@@ -214,6 +186,7 @@ services:
 volumes:
   pgdata:
   recordings:
+  vod_streams:
   backups:
   tunnel_data:
 

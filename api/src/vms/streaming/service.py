@@ -5,9 +5,8 @@ import logging
 import re
 import uuid
 
-from vms.cameras.repository import CameraRepositoryPort
-from vms.iam.repository import ApiKeyRepositoryPort
 from vms.streaming.domain import StreamSession
+from vms.streaming.ports import StreamAuthPort, StreamCameraPort
 from vms.streaming.repository import StreamSessionRepositoryPort
 
 logger = logging.getLogger(__name__)
@@ -22,12 +21,12 @@ class StreamingService:
     def __init__(
         self,
         repo: StreamSessionRepositoryPort,
-        camera_repo: CameraRepositoryPort | None = None,
-        api_key_repo: ApiKeyRepositoryPort | None = None,
+        camera_port: StreamCameraPort | None = None,
+        auth_port: StreamAuthPort | None = None,
     ) -> None:
         self._repo = repo
-        self._camera_repo = camera_repo
-        self._api_key_repo = api_key_repo
+        self._camera_port = camera_port
+        self._auth_port = auth_port
 
     async def on_stream_ready(self, mediamtx_path: str) -> StreamSession | None:
         """
@@ -42,9 +41,9 @@ class StreamingService:
         # Tenta resolver via stream_key para paths live/{key}
         if not ids:
             live_match = _LIVE_RE.match(mediamtx_path)
-            if live_match and self._camera_repo:
+            if live_match and self._camera_port:
                 stream_key = live_match.group("stream_key")
-                camera = await self._camera_repo.get_by_stream_key(stream_key)
+                camera = await self._camera_port.get_by_stream_key(stream_key)
                 if camera:
                     ids = (camera.tenant_id, camera.id)
 
@@ -95,8 +94,8 @@ class StreamingService:
         live_match = _LIVE_RE.match(path)
         if live_match:
             stream_key = live_match.group("stream_key")
-            if self._camera_repo:
-                camera = await self._camera_repo.get_by_stream_key(stream_key)
+            if self._camera_port:
+                camera = await self._camera_port.get_by_stream_key(stream_key)
                 if camera and camera.rtmp_stream_key == stream_key:
                     return True
             return False
@@ -109,24 +108,15 @@ class StreamingService:
         tenant_id, camera_id = ids
 
         # Tenta validar como stream key de câmera RTMP push
-        if self._camera_repo:
-            camera = await self._camera_repo.get_by_id(camera_id, tenant_id)
+        if self._camera_port:
+            camera = await self._camera_port.get_by_id(camera_id, tenant_id)
             if camera and camera.rtmp_stream_key and camera.rtmp_stream_key == token:
                 return True
 
         # Tenta validar como API key de agent
-        if self._api_key_repo:
-            from vms.core.security import extract_key_prefix, verify_api_key
-
-            prefix = extract_key_prefix(token)
-            api_key = await self._api_key_repo.get_by_prefix(prefix)
-            if (
-                api_key
-                and api_key.is_active
-                and api_key.tenant_id == tenant_id
-                and verify_api_key(token, api_key.key_hash)
-            ):
-                await self._api_key_repo.update_last_used(api_key.id)
+        if self._auth_port:
+            owner_id = await self._auth_port.verify_api_key(token)
+            if owner_id:
                 return True
 
         return False
@@ -141,7 +131,7 @@ class StreamingService:
         if not token:
             return False
         try:
-            from vms.core.security import decode_token
+            from vms.infrastructure.security import decode_token
 
             payload = decode_token(token)
             if payload.get("type") != "viewer":
@@ -152,9 +142,9 @@ class StreamingService:
             # Para live/{stream_key}, resolve camera_id pelo stream_key
             if not ids:
                 live_match = _LIVE_RE.match(path)
-                if live_match and self._camera_repo:
+                if live_match and self._camera_port:
                     stream_key = live_match.group("stream_key")
-                    camera = await self._camera_repo.get_by_stream_key(stream_key)
+                    camera = await self._camera_port.get_by_stream_key(stream_key)
                     if camera:
                         ids = (camera.tenant_id, camera.id)
 

@@ -9,6 +9,7 @@ from fastapi import APIRouter, HTTPException, Query, Request, status
 from vms.cameras.repository import CameraRepository
 from vms.core.deps import DbSession
 from vms.iam.repository import ApiKeyRepository
+from vms.streaming.ports import StreamAuthPort, StreamCameraPort
 from vms.streaming.repository import StreamSessionRepository
 from vms.streaming.schemas import (
     AnalyticsAuthRequest,
@@ -23,11 +24,37 @@ router = APIRouter()
 
 
 def _streaming_svc(db: DbSession) -> StreamingService:
-    """Constrói StreamingService com repositórios de auth."""
+    """Constrói StreamingService com ports de auth."""
+    camera_repo = CameraRepository(db)
+    api_key_repo = ApiKeyRepository(db)
+
+    # Adapter: implementa StreamCameraPort usando CameraRepository
+    class _CameraPortAdapter(StreamCameraPort):
+        async def get_by_id(self, camera_id, tenant_id):
+            return await camera_repo.get_by_id(camera_id, tenant_id)
+        async def get_by_stream_key(self, stream_key):
+            return await camera_repo.get_by_stream_key(stream_key)
+        async def get_by_mediamtx_path(self, mediamtx_path):
+            return await camera_repo.get_by_mediamtx_path(mediamtx_path)
+
+    # Adapter: implementa StreamAuthPort usando ApiKeyRepository + security
+    class _AuthPortAdapter(StreamAuthPort):
+        async def verify_api_key(self, api_key):
+            from vms.infrastructure.security import extract_key_prefix, verify_api_key
+            prefix = extract_key_prefix(api_key)
+            key_obj = await api_key_repo.get_by_prefix(prefix)
+            if key_obj and key_obj.is_active and verify_api_key(api_key, key_obj.key_hash):
+                await api_key_repo.update_last_used(key_obj.id)
+                return key_obj.owner_id
+            return None
+        async def decode_viewer_token(self, token):
+            from vms.infrastructure.security import decode_token
+            return decode_token(token)
+
     return StreamingService(
         StreamSessionRepository(db),
-        camera_repo=CameraRepository(db),
-        api_key_repo=ApiKeyRepository(db),
+        camera_port=_CameraPortAdapter(),
+        auth_port=_AuthPortAdapter(),
     )
 
 
