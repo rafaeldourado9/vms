@@ -498,7 +498,24 @@ async def intelbras_webhook(
             logger.info("ANPR Intelbras | placa=%s camera=%s", detection.plate, cam_id)
             return {"ok": True, "event_id": event.id}
         except Exception as exc:
-            logger.error("Erro ao normalizar Intelbras: %s", exc)
+            logger.error("Erro ao normalizar Intelbras ALPR: %s", exc)
+
+    # Tenta Smart Events Intelbras
+    smart_normalizer = registry.get("intelbras_smart")
+    if smart_normalizer and smart_normalizer.can_handle(body):
+        try:
+            detection = smart_normalizer.normalize(body, cam_id, tenant_id)
+            # Salva como VmsEvent genérico (não é ALPR, logo não precisa de dedup de placa)
+            event = await _store_event(
+                tenant_id, cam_id,
+                event_type=detection.raw_payload.get("event") or "intelbras_smart_event",
+                payload=detection.raw_payload,
+                confidence=detection.confidence or None,
+            )
+            logger.info("Smart Event Intelbras | tipo=%s camera=%s", detection.raw_payload.get("event"), cam_id)
+            return {"ok": True, "event_id": str(event.id) if event else None}
+        except Exception as exc:
+            logger.error("Erro ao normalizar Smart Event Intelbras: %s", exc)
 
     # Fallback genérico
     event_type = f"intelbras_{body.get('eventType', body.get('type', body.get('event', 'event')))}"
