@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from vms.core.exceptions import NotFoundError
+from vms.shared.exceptions import NotFoundError
 from vms.events.domain import VmsEvent
 from vms.events.service import EventService
 

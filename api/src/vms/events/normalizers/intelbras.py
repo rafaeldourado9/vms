@@ -1,10 +1,13 @@
 """Normalizador de payload ALPR para câmeras Intelbras."""
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 
 from vms.events.domain import AlprDetection
 from vms.events.normalizers.base import registry
+
+logger = logging.getLogger(__name__)
 
 
 class IntelbrasNormalizer:
@@ -34,8 +37,8 @@ class IntelbrasNormalizer:
         # Formato 1: campo 'placa' (PT)
         if "placa" in raw:
             return True
-        # Formato 2: campo 'plate' (EN)
-        if "plate" in raw:
+        # Formato 2: campo 'plate' APENAS se também tiver 'confianca' ou 'Events' (para não conflitar com generic)
+        if "plate" in raw and ("confianca" in raw or "Events" in raw):
             return True
         # Formato 3: DVR/NVR com lista Events contendo AnprEvent
         events = raw.get("Events", [])

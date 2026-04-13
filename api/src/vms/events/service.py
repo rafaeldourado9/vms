@@ -6,9 +6,9 @@ import uuid
 
 from redis.asyncio import Redis
 
-from vms.core.config import get_settings
-from vms.core.event_bus import publish_event
-from vms.core.exceptions import NotFoundError
+from vms.infrastructure.config import get_settings
+from vms.infrastructure.messaging.event_bus import publish_event
+from vms.shared.exceptions import NotFoundError
 from vms.events.domain import AlprDetection, VmsEvent
 from vms.events.repository import EventRepositoryPort
 

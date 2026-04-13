@@ -30,6 +30,7 @@ from vms.cameras.models import CameraModel
 from vms.core.database import get_session_factory
 from vms.events.models import VmsEventModel
 from vms.events.normalizers.base import registry
+from vms.shared.api.rate_limit import limiter
 
 logger = logging.getLogger(__name__)
 
@@ -335,6 +336,7 @@ async def _publish_sse(tenant_id: str, event_type: str, data: dict) -> None:
     summary="Webhook Hikvision Alarm Server",
     tags=["webhooks-public"],
 )
+@limiter.limit("100/minute")
 async def hikvision_webhook(
     request: Request,
     camera_id: str | None = Query(
@@ -384,27 +386,33 @@ async def hikvision_webhook(
 
     tenant_id, cam_id = cam_info
 
-    # Tenta normalizar como ANPR
+    # Tenta normalizar como ANPR e usa EventService com dedup Redis
     normalizer = registry.get("hikvision")
     if normalizer and normalizer.can_handle(body):
         try:
             detection = normalizer.normalize(body, cam_id, tenant_id)
-            event = await _store_event(
-                tenant_id, cam_id,
-                event_type="alpr_detected",
-                payload=body,
-                plate=detection.plate,
-                confidence=detection.confidence,
-            )
-            # Publica SSE para frontend
-            await _publish_sse(tenant_id, "alpr.detected", {
-                "plate": detection.plate,
-                "confidence": detection.confidence,
-                "camera_id": cam_id,
-                "event_id": str(event.id) if event else None,
-            })
+
+            # Usa EventService.ingest_alpr() para dedup Redis + publish
+            from vms.events.service import EventService
+            from vms.events.repository import EventRepository
+            from vms.core.database import get_session_factory
+
+            factory = get_session_factory()
+            async with factory() as session:
+                svc = EventService(EventRepository(session))
+                event = await svc.ingest_alpr(detection, request.app.state.redis)
+
+            if event is None:
+                # Duplicata ignorada pelo dedup
+                logger.debug(
+                    "ANPR Hikvision duplicata ignorada: placa=%s camera=%s",
+                    detection.plate,
+                    cam_id,
+                )
+                return {"ok": True, "event_id": None, "dedup": True}
+
             logger.info("ANPR Hikvision | placa=%s camera=%s", detection.plate, cam_id)
-            return {"ok": True, "event_id": str(event.id) if event else None}
+            return {"ok": True, "event_id": event.id}
         except Exception as exc:
             logger.error("Erro ao normalizar ANPR Hikvision: %s", exc)
 
@@ -432,6 +440,7 @@ async def hikvision_webhook(
     summary="Webhook Intelbras",
     tags=["webhooks-public"],
 )
+@limiter.limit("100/minute")
 async def intelbras_webhook(
     request: Request,
     camera_id: str | None = Query(None, description="UUID da câmera"),
@@ -467,22 +476,27 @@ async def intelbras_webhook(
     if normalizer and normalizer.can_handle(body):
         try:
             detection = normalizer.normalize(body, cam_id, tenant_id)
-            event = await _store_event(
-                tenant_id, cam_id,
-                event_type="alpr_detected",
-                payload=body,
-                plate=detection.plate,
-                confidence=detection.confidence,
-            )
-            # Publica SSE para frontend
-            await _publish_sse(tenant_id, "alpr.detected", {
-                "plate": detection.plate,
-                "confidence": detection.confidence,
-                "camera_id": cam_id,
-                "event_id": str(event.id) if event else None,
-            })
+
+            # Usa EventService.ingest_alpr() para dedup Redis + publish
+            from vms.events.service import EventService
+            from vms.events.repository import EventRepository
+            from vms.core.database import get_session_factory
+
+            factory = get_session_factory()
+            async with factory() as session:
+                svc = EventService(EventRepository(session))
+                event = await svc.ingest_alpr(detection, request.app.state.redis)
+
+            if event is None:
+                logger.debug(
+                    "ANPR Intelbras duplicata ignorada: placa=%s camera=%s",
+                    detection.plate,
+                    cam_id,
+                )
+                return {"ok": True, "event_id": None, "dedup": True}
+
             logger.info("ANPR Intelbras | placa=%s camera=%s", detection.plate, cam_id)
-            return {"ok": True, "event_id": str(event.id) if event else None}
+            return {"ok": True, "event_id": event.id}
         except Exception as exc:
             logger.error("Erro ao normalizar Intelbras: %s", exc)
 
@@ -515,6 +529,7 @@ async def intelbras_webhook(
     summary="Webhook genérico",
     tags=["webhooks-public"],
 )
+@limiter.limit("100/minute")
 async def generic_camera_webhook(
     request: Request,
     camera_id: str | None = Query(None),
@@ -534,22 +549,21 @@ async def generic_camera_webhook(
         if normalizer.can_handle(body):
             try:
                 detection = normalizer.normalize(body, cam_id, tenant_id)
-                event = await _store_event(
-                    tenant_id, cam_id,
-                    event_type="alpr_detected",
-                    payload=body,
-                    plate=detection.plate,
-                    confidence=detection.confidence,
-                )
-                # Publica SSE para frontend
-                await _publish_sse(tenant_id, "alpr.detected", {
-                    "plate": detection.plate,
-                    "confidence": detection.confidence,
-                    "camera_id": cam_id,
-                    "manufacturer": mfr,
-                    "event_id": str(event.id) if event else None,
-                })
-                return {"ok": True, "manufacturer": mfr, "event_id": str(event.id) if event else None}
+
+                # Usa EventService.ingest_alpr() para dedup Redis + publish
+                from vms.events.service import EventService
+                from vms.events.repository import EventRepository
+                from vms.core.database import get_session_factory
+
+                factory = get_session_factory()
+                async with factory() as session:
+                    svc = EventService(EventRepository(session))
+                    event = await svc.ingest_alpr(detection, request.app.state.redis)
+
+                if event is None:
+                    return {"ok": True, "manufacturer": mfr, "event_id": None, "dedup": True}
+
+                return {"ok": True, "manufacturer": mfr, "event_id": event.id}
             except Exception as exc:
                 logger.error("Erro ao normalizar %s: %s", mfr, exc)
 
@@ -571,3 +585,40 @@ async def generic_camera_webhook(
         "event_id": str(event.id) if event else None,
     })
     return {"ok": True, "event_id": str(event.id) if event else None}
+
+
+# ─── Health Check ─────────────────────────────────────────────────────────────
+
+@router.get(
+    "/webhooks/health",
+    summary="Health check para webhooks públicos",
+    tags=["webhooks-public"],
+)
+async def webhooks_health() -> dict:
+    """
+    Retorna status dos normalizers, Redis e DB.
+
+    Uso: GET /webhooks/health
+    """
+    from vms.core.database import get_session_factory
+    from sqlalchemy import text
+
+    # Verifica normalizers registrados
+    normalizers = list(registry._normalizers.keys())
+
+    # Verifica DB
+    db_status = "error"
+    try:
+        factory = get_session_factory()
+        async with factory() as session:
+            await session.execute(text("SELECT 1"))
+            db_status = "ok"
+    except Exception:
+        pass
+
+    return {
+        "status": "ok" if db_status == "ok" else "degraded",
+        "normalizers": normalizers,
+        "normalizer_count": len(normalizers),
+        "database": db_status,
+    }

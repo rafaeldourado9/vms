@@ -1,11 +1,14 @@
 """Normalizador de payload ALPR para câmeras Hikvision ANPR."""
 from __future__ import annotations
 
+import logging
 import re
 from datetime import datetime
 
 from vms.events.domain import AlprDetection
 from vms.events.normalizers.base import registry
+
+logger = logging.getLogger(__name__)
 
 
 class HikvisionNormalizer:
