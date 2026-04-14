@@ -1,13 +1,9 @@
-"""billing: license_keys + usage_records + pricing_rules (pay-per-use model)
+"""billing: license_keys + analytics_pricing (two deployment models)
 
-Revision ID: 021
-Revises: 020
-Create Date: 2026-04-13 20:00:00.000000
+White Label (Managed):   R$ 15.000/ano + storage R$50/cam/mês + analytics mensal
+White Label (Self-Hosted): R$ 20.000/ano + storage por conta do cliente + analytics por conta do cliente
 
-Modelo de negócio:
-- Licença anual: pagamento único, valida por 1 ano
-- Storage: cobrança mensal por GB usado
-- Analytics: pay-per-use por câmera que usa cada plugin
+Formato da license key: XXXX-XXXXX-XXXXX-XXXXX-XXXXX (4-5-5-5-5)
 """
 from typing import Sequence, Union
 
@@ -22,15 +18,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # 1. license_keys — licença anual de ativação
+    # 1. license_keys
     op.create_table(
         'license_keys',
         sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
-        sa.Column('license_key', sa.String(24), nullable=False),
+        sa.Column('license_key', sa.String(29), nullable=False),
         sa.Column('tenant_id', postgresql.UUID(as_uuid=True), nullable=True),
+        sa.Column('deployment_model', sa.String(20), nullable=False, server_default=sa.text("'managed'")),
         sa.Column('status', sa.String(20), nullable=False, server_default=sa.text("'active'")),
         sa.Column('max_cameras', sa.Integer(), nullable=False, server_default=sa.text("0")),
         sa.Column('price_annual', sa.Numeric(10, 2), nullable=False, server_default=sa.text("0")),
+        sa.Column('hardware_id', sa.String(64), nullable=True),
         sa.Column('activated_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('expires_at', sa.DateTime(timezone=True), nullable=True),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text("now()")),
@@ -38,37 +36,20 @@ def upgrade() -> None:
         sa.Index('ix_license_keys_tenant', 'tenant_id'),
     )
 
-    # 2. usage_records — storage mensal + analytics pay-per-use
+    # 2. analytics_pricing
     op.create_table(
-        'usage_records',
+        'analytics_pricing',
         sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
-        sa.Column('tenant_id', postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column('usage_type', sa.String(30), nullable=False),
-        sa.Column('camera_id', postgresql.UUID(as_uuid=True), nullable=True),
-        sa.Column('quantity', sa.Numeric(15, 4), nullable=False),
-        sa.Column('unit_price', sa.Numeric(10, 4), nullable=False, server_default=sa.text("0")),
-        sa.Column('total_price', sa.Numeric(15, 4), nullable=False, server_default=sa.text("0")),
-        sa.Column('period_start', sa.DateTime(timezone=True), nullable=False),
-        sa.Column('period_end', sa.DateTime(timezone=True), nullable=False),
-        sa.Column('recorded_at', sa.DateTime(timezone=True), server_default=sa.text("now()")),
-        sa.Index('ix_usage_records_tenant_period', 'tenant_id', 'period_start'),
-        sa.Index('ix_usage_records_type', 'usage_type'),
-    )
-
-    # 3. pricing_rules — tabela de preços editável
-    op.create_table(
-        'pricing_rules',
-        sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
-        sa.Column('usage_type', sa.String(30), nullable=False),
-        sa.Column('unit', sa.String(20), nullable=False, server_default=sa.text("'GB'")),
-        sa.Column('price_per_unit', sa.Numeric(10, 4), nullable=False, server_default=sa.text("0")),
+        sa.Column('plugin_name', sa.String(50), nullable=False),
+        sa.Column('tier', sa.String(20), nullable=False, server_default=sa.text("'light'")),
+        sa.Column('price_per_camera_per_day', sa.Numeric(10, 4), nullable=False, server_default=sa.text("6.90")),
         sa.Column('description', sa.Text(), nullable=True),
         sa.Column('is_active', sa.Boolean(), nullable=False, server_default=sa.text("true")),
         sa.Column('created_at', sa.DateTime(timezone=True), server_default=sa.text("now()")),
-        sa.UniqueConstraint('usage_type', name='uq_pricing_rules_type'),
+        sa.UniqueConstraint('plugin_name', name='uq_analytics_pricing_plugin'),
     )
 
-    # 4. tenant: onboarding_complete + license_key_id
+    # 3. tenant: onboarding_complete + license_key_id
     op.add_column('tenants', sa.Column('onboarding_complete', sa.Boolean(), nullable=False, server_default=sa.text("false")))
     op.add_column('tenants', sa.Column('license_key_id', postgresql.UUID(as_uuid=True), nullable=True))
 
@@ -76,6 +57,5 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_column('tenants', 'license_key_id')
     op.drop_column('tenants', 'onboarding_complete')
-    op.drop_table('pricing_rules')
-    op.drop_table('usage_records')
+    op.drop_table('analytics_pricing')
     op.drop_table('license_keys')

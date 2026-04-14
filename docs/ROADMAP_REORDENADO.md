@@ -6,6 +6,44 @@
 
 ---
 
+## 💰 MODELO DE NEGÓCIO (definido)
+
+### Dois Modos de Deploy
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  White Label (Managed) — R$ 15.000/ano                      │
+│  Cuidamos da sua infra                                      │
+│                                                             │
+│  ✅ Incluso: Streaming, Câmeras, Users, Relatórios,         │
+│             Acesso total, LPR (webhooks)                   │
+│  💾 Storage: R$ 50/cam/mês (obrigatório)                   │
+│     opções: 7 dias | 15 dias | 30 dias (por câmera)       │
+│  🧠 Analytics: pago por plugin/câmera/mês                  │
+│     Analytics leves: a partir de R$ 6,90/dia              │
+│     Analytics Pro: a partir de R$ 9,90/dia                │
+│  🎯 SLA Dedicado, Suporte Prioritário                      │
+└─────────────────────────────────────────────────────────────┘
+
+┌─────────────────────────────────────────────────────────────┐
+│  White Label (Self-Hosted) — R$ 20.000/ano                 │
+│  Você cuida da sua infra                                    │
+│                                                             │
+│  ✅ Incluso: Streaming, Câmeras, Users, Relatórios,         │
+│             Acesso total, LPR (webhooks)                   │
+│  💾 Storage: Por conta do cliente                          │
+│  🧠 Analytics: Por conta do cliente                        │
+└─────────────────────────────────────────────────────────────┘
+```
+
+### Formato da License Key
+```
+XXXX-XXXXX-XXXXX-XXXXX-XXXXX
+Ex: VKMH-WXSAQ-XQQWR-CAMWQ-QDAFW
+```
+
+---
+
 ## ✅ O QUE JÁ ESTÁ IMPLEMENTADO (Sprints 0–8)
 
 | Sprint | Status | O que existe |

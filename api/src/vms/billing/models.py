@@ -1,4 +1,4 @@
-"""Modelos SQLAlchemy para billing — licença anual + storage + analytics pay-per-use."""
+"""Modelos SQLAlchemy — dois modos: Managed (R$15k/ano) e Self-Hosted (R$20k/ano)."""
 from __future__ import annotations
 
 import uuid
@@ -10,10 +10,10 @@ from vms.infrastructure.database.connection import Base
 
 
 class LicenseKeyModel(Base):
-    """Licença de ativação anual (pagamento único).
+    """Licença de ativação anual — dois modos.
 
-    O cliente compra uma licença com validade de 1 ano.
-    Ao ativar, o sistema libera o uso. Renovar = gerar nova key.
+    White Label (Managed):   R$ 15.000/ano + storage R$50/cam/mês + analytics mensal
+    White Label (Self-Hosted): R$ 20.000/ano + storage por conta do cliente
     """
 
     __tablename__ = "license_keys"
@@ -23,55 +23,34 @@ class LicenseKeyModel(Base):
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    license_key = Column(String(24), nullable=False, unique=True)   # VMS-XXXX-XXXX-XXXX-XXXX
-    tenant_id = Column(UUID(as_uuid=True), nullable=True)           # NULL = ainda não ativada
+    license_key = Column(String(29), nullable=False, unique=True)   # XXXX-XXXXX-XXXXX-XXXXX-XXXXX
+    tenant_id = Column(UUID(as_uuid=True), nullable=True)
+    deployment_model = Column(String(20), nullable=False, server_default=text("'managed'"))  # managed | self_hosted
     status = Column(String(20), nullable=False, server_default=text("'active'"))
-    max_cameras = Column(Integer(), nullable=False, server_default=text("0"))      # 0 = ilimitado
-    price_annual = Column(Numeric(10, 2), nullable=False, server_default=text("0"))  # preço pago
+    max_cameras = Column(Integer(), nullable=False, server_default=text("0"))
+    price_annual = Column(Numeric(10, 2), nullable=False, server_default=text("0"))
+    hardware_id = Column(String(64), nullable=True)          # fingerprint (self-hosted)
     activated_at = Column(DateTime(timezone=True), nullable=True)
-    expires_at = Column(DateTime(timezone=True), nullable=True)       # 1 ano após ativação
+    expires_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=text("now()"))
 
 
-class UsageRecordModel(Base):
-    """Registro de uso mensal — storage e analytics por câmera.
+class AnalyticsPricingModel(Base):
+    """Preços de analytics por plugin — renovado mensal.
 
-    Gera fatura automática no início de cada mês.
+    Analytics leves (câmeras burras): a partir de R$ 6,90/dia
+    Analytics Pro: a partir de R$ 9,90/dia
     """
 
-    __tablename__ = "usage_records"
+    __tablename__ = "analytics_pricing"
     __table_args__ = (
-        Index('ix_usage_records_tenant_period', 'tenant_id', 'period_start'),
-        Index('ix_usage_records_type', 'usage_type'),
+        Index('ix_analytics_pricing_plugin', 'plugin_name', unique=True),
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), nullable=False)
-    usage_type = Column(String(30), nullable=False)    # "storage" ou analytics plugin id
-    camera_id = Column(UUID(as_uuid=True), nullable=True)  # NULL para storage (global)
-    quantity = Column(Numeric(15, 4), nullable=False)   # GB ou número de câmeras
-    unit_price = Column(Numeric(10, 4), nullable=False, server_default=text("0"))  # preço por unidade
-    total_price = Column(Numeric(15, 4), nullable=False, server_default=text("0"))  # quantity * unit_price
-    period_start = Column(DateTime(timezone=True), nullable=False)
-    period_end = Column(DateTime(timezone=True), nullable=False)
-    recorded_at = Column(DateTime(timezone=True), server_default=text("now()"))
-
-
-class PricingRuleModel(Base):
-    """Tabela de preços — storage mensal e analytics por câmera.
-
-    Editável pelo admin global.
-    """
-
-    __tablename__ = "pricing_rules"
-    __table_args__ = (
-        Index('ix_pricing_rules_type', 'usage_type', unique=True),
-    )
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    usage_type = Column(String(30), nullable=False, unique=True)   # "storage", "intrusion", "ppe_detection", etc.
-    unit = Column(String(20), nullable=False, server_default=text("'GB'"))  # "GB", "camera/mês"
-    price_per_unit = Column(Numeric(10, 4), nullable=False, server_default=text("0"))
+    plugin_name = Column(String(50), nullable=False, unique=True)  # intrusion, people_count, etc.
+    tier = Column(String(20), nullable=False, server_default=text("'light'"))  # light | pro
+    price_per_camera_per_day = Column(Numeric(10, 4), nullable=False, server_default=text("6.90"))
     description = Column(Text(), nullable=True)
     is_active = Column(Boolean(), nullable=False, server_default=text("true"))
     created_at = Column(DateTime(timezone=True), server_default=text("now()"))
