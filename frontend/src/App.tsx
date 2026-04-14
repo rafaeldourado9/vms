@@ -22,6 +22,8 @@ import { AuditPage }           from '@/pages/AuditPage'
 import { BillingPage }         from '@/pages/BillingPage'
 import { LGPDPage }            from '@/pages/LGPDPage'
 import { SystemHealthPage }    from '@/pages/SystemHealthPage'
+import { AnalyticsDashboardPage } from '@/pages/AnalyticsDashboardPage'
+import { AgentsPage }          from '@/pages/AgentsPage'
 
 // ─── Proteções de segurança no frontend ───────────────────────────────────────
 
@@ -66,6 +68,8 @@ function AuthenticatedApp() {
         <Route path="/events"        element={<EventsPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/analytics"     element={<ROIManagementPage />} />
+        <Route path="/analytics-dashboard" element={<AnalyticsDashboardPage />} />
+        <Route path="/agents"        element={<AgentsPage />} />
         <Route path="/reports"       element={<ReportsPage />} />
         <Route path="/audit"         element={<AuditPage />} />
         <Route path="/billing"       element={<BillingPage />} />
