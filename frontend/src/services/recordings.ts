@@ -22,52 +22,90 @@ interface CreateClipData {
   vms_event_id?: string
 }
 
-interface SegmentListResponse {
-  items: RecordingSegment[]
-  total: number
-  page: number
-  page_size: number
-  pages: number
+export interface VerifyIntegrityResult {
+  verified: boolean
+  reason?: string
+  stored_hash: string | null
+  current_hash: string | null
+  verified_at: string
 }
 
-interface ClipListResponse {
-  items: Clip[]
-  total: number
-  page: number
-  page_size: number
-  pages: number
+export interface CustodyChainEntry {
+  action: string
+  timestamp: string
+  actor: string
+  user_email?: string
+  file_path?: string
+  zip_size_bytes?: number
+  hmac_signature?: string
+}
+
+export interface CustodyChainResult {
+  recording_id: string
+  tenant_id: string
+  custody_chain: CustodyChainEntry[]
+  total_entries: number
+}
+
+export interface ForensicExportResult {
+  recording_id: string
+  exported_at: string
+  exported_by: string
+  file_path: string
+  download_url: string
+  zip_size_bytes: number
+  sha256_hash: string
+  hmac_signature: string
+  integrity_verified: boolean
 }
 
 export const recordingsService = {
-  async listSegments(params: ListSegmentsParams): Promise<SegmentListResponse> {
-    const res = await api.get<SegmentListResponse>('/recordings', { params })
-    return res.data
+  async listSegments(params: ListSegmentsParams): Promise<{ items: RecordingSegment[]; total: number; page: number; page_size: number }> {
+    const { data } = await api.get('/recordings', { params })
+    return data
   },
 
-  async timeline(cameraId: string, params?: { date?: string }): Promise<TimelineHour[]> {
-    const res = await api.get<TimelineHour[]>(`/cameras/${cameraId}/timeline`, { params })
-    return res.data
+  async getTimeline(camera_id: string, started_after?: string, started_before?: string): Promise<TimelineHour[]> {
+    const { data } = await api.get(`/cameras/${camera_id}/timeline`, {
+      params: { started_after, started_before },
+    })
+    return data
+  },
+
+  async download(recordingId: string): Promise<{ download_url: string; file_path: string }> {
+    const { data } = await api.get(`/recordings/${recordingId}/download`)
+    return data
+  },
+
+  async listClips(params: ListClipsParams = {}): Promise<{ items: Clip[]; total: number; page: number; page_size: number }> {
+    const { data } = await api.get('/recordings/clips', { params })
+    return data
+  },
+
+  async getClip(clipId: string): Promise<Clip> {
+    const { data } = await api.get(`/recordings/clips/${clipId}`)
+    return data
   },
 
   async createClip(data: CreateClipData): Promise<Clip> {
-    const res = await api.post<Clip>('/recordings/clips', data)
-    return res.data
+    const { data: clip } = await api.post('/recordings/clips', data)
+    return clip
   },
 
-  async getClip(id: string): Promise<Clip> {
-    const res = await api.get<Clip>(`/recordings/clips/${id}`)
-    return res.data
+  // ── Cadeia de Custódia ───────────────────────────────────────────
+
+  async verifyIntegrity(recordingId: string): Promise<VerifyIntegrityResult> {
+    const { data } = await api.get(`/recordings/${recordingId}/verify-integrity`)
+    return data
   },
 
-  async listClips(params?: ListClipsParams): Promise<ClipListResponse> {
-    const res = await api.get<ClipListResponse>('/recordings/clips', { params })
-    return res.data
+  async getCustodyChain(recordingId: string): Promise<CustodyChainResult> {
+    const { data } = await api.get(`/recordings/${recordingId}/custody-chain`)
+    return data
   },
 
-  async downloadUrl(recordingId: string): Promise<{ download_url: string; file_path: string }> {
-    const res = await api.get<{ download_url: string; file_path: string }>(
-      `/recordings/${recordingId}/download`,
-    )
-    return res.data
+  async exportForensic(recordingId: string): Promise<ForensicExportResult> {
+    const { data } = await api.post(`/recordings/${recordingId}/export-forensic`)
+    return data
   },
 }

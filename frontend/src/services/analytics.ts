@@ -62,6 +62,8 @@ export const analyticsService = {
     camera_id?: string
     plugin_id?: string
     severity?: string
+    occurred_after?: string
+    occurred_before?: string
     limit?: number
   }): Promise<AnalyticsEvent[]> => {
     const { data } = await api.get<AnalyticsEvent[]>('/analytics/events', { params })

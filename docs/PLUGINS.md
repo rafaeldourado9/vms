@@ -1,186 +1,97 @@
-# VMS MVP — Guia de Plugins Analytics
+# VMS MVP — Analytics Plugins
 
-> Para câmeras sem IA embarcada. Roda no `analytics_service`.
-
----
-
-## Conceito
-
-Qualquer câmera bullet envia stream RTSP → MediaMTX captura → analytics_service
-extrai 1 frame/segundo → plugin processa → evento publicado no VMS.
-
-```
-Câmera RTSP → MediaMTX → analytics_service
-                              ├── intrusion_detection
-                              ├── people_count
-                              ├── vehicle_count
-                              └── lpr (plate recognition)
-                                      ↓
-                              POST /internal/analytics/ingest/
-                                      ↓
-                              VmsEvent criado + publicado
-```
+> Versao: 2.0 · Data: 2026-04-12
+> Servico: analytics/ (FastAPI + YOLOv8)
 
 ---
 
-## Interface Base
+## 1. Visao Geral
 
-```python
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
-from datetime import datetime
-import numpy as np
+O Analytics Service e um servico independente que roda plugins de deteccao
+sobre frames RTSP das cameras. Nao depende do VMS API em tempo de execucao
+(exceto para discovery de cameras e ROIs via HTTP).
 
-@dataclass
-class ROIConfig:
-    """Configuração de região de interesse para o plugin."""
-    id: str
-    name: str
-    ia_type: str
-    polygon_points: list[list[float]]  # normalizado 0.0–1.0
-    config: dict                        # configuração específica do plugin
-
-@dataclass
-class FrameMetadata:
-    """Metadados do frame sendo processado."""
-    camera_id: str
-    tenant_id: str
-    timestamp: datetime
-    stream_url: str
-
-@dataclass
-class AnalyticsResult:
-    """Resultado de análise de um plugin."""
-    plugin: str
-    camera_id: str
-    tenant_id: str
-    roi_id: str
-    event_type: str
-    payload: dict
-    occurred_at: datetime
-
-class AnalyticsPlugin(ABC):
-    """Base para todos os plugins de analytics."""
-
-    name: str        # identificador único: "people_count"
-    version: str     # semver: "1.0.0"
-    roi_type: str    # tipo de ROI que este plugin processa: "human_traffic"
-
-    async def initialize(self, config: dict) -> None:
-        """Carrega modelos, aloca recursos. Chamado uma vez no startup."""
-
-    @abstractmethod
-    async def process_frame(
-        self,
-        frame: np.ndarray,
-        metadata: FrameMetadata,
-        rois: list[ROIConfig],
-    ) -> list[AnalyticsResult]:
-        """Processa um frame e retorna lista de resultados."""
-
-    async def shutdown(self) -> None:
-        """Libera recursos. Chamado no shutdown do serviço."""
+```
++----------------------------+
+|    Analytics Service       |
+|                            |
+|  Orchestrator              |
+|    |-- load_plugins()      |    GET /plugins/cameras
+|    |-- start()  ---------> |  -----------------> VMS API
+|    |                       |    GET /plugins/rois
+|    v                       |  -----------------> VMS API
+|  Per camera (async task):  |
+|    FrameSource (RTSP)      |    rtsp://mediamtx:8554/{path}
+|    |-- read() 1fps         |  -----------------> MediaMTX
+|    v                       |
+|  Plugins (process_frame)   |
+|    |-- Intrusion           |
+|    |-- PeopleCount         |    POST /plugins/events
+|    |-- VehicleCount        |  -----------------> VMS API
+|    |-- LPR                 |
+|    |-- FireSmoke           |
+|    |-- PPE                 |
+|    |-- Biker               |
+|    +-- HorseCart           |
++----------------------------+
 ```
 
 ---
 
-## Plugin: intrusion_detection
+## 2. Catalogo de Plugins
 
-**ROI type:** `intrusion`
-**Evento:** `analytics.intrusion.detected`
-**Modelo:** YOLOv8n (COCO)
-**Classes padrão:** person (0)
+| # | ID | Nome | Categoria | Modelo | Tamanho | FPS | ROI obrigatorio |
+|---|-----|------|-----------|--------|---------|-----|-----------------|
+| 1 | intrusion | Intrusion Detection | security | YOLOv8n (object.pt) | 3.2 MB | 1 | Sim |
+| 2 | people_count | People Counting | traffic | YOLOv8n (object.pt) | 3.2 MB | 1 | Sim |
+| 3 | vehicle_count | Vehicle Counting | traffic | YOLOv8n (object.pt) | 3.2 MB | 1 | Sim |
+| 4 | fire_smoke | Fire & Smoke | safety | Custom (fire.pt) | 49.7 MB | 2 | Opcional |
+| 5 | ppe_detection | PPE Detection | safety | Custom (ppe.pt) | 6.0 MB | 3 | Opcional |
+| 6 | biker_detection | Biker Helmet | traffic | Custom (biker_2.pt) | 6.0 MB | 2 | Opcional |
+| 7 | lpr | License Plate (LPR) | security | YOLO + fast-plate-ocr | 6.2 MB | 4 | Sim |
+| 8 | horse_cart | Horse & Cart | custom | Custom (horse_cart.pt) | 49.6 MB | 2 | Opcional |
 
-### Lógica
-1. Inferência YOLO no frame completo
-2. Filtrar detecções pela(s) classe(s) configurada(s)
-3. Para cada ROI ativa, checar se centroide da bbox está dentro do polígono
-4. Emitir evento se houver detecção dentro da ROI
+---
 
-### Config da ROI
+## 3. Configuracao de ROI por Plugin
+
+### intrusion
 ```json
 {
-  "classes": [0],          // IDs COCO (padrão: person)
   "min_confidence": 0.5,
-  "cooldown_seconds": 30   // não re-emitir dentro deste intervalo
+  "cooldown_seconds": 30
 }
 ```
+- Detecta classes COCO (default: person=0)
+- Emite evento se centroid do bbox esta dentro do poligono
+- Cooldown impede emissao repetida (debounce)
+- Evento: `analytics.intrusion.detected`
 
-### Payload do Evento
+### people_count
 ```json
 {
-  "roi_id": "uuid",
-  "roi_name": "Zona Proibida",
-  "detection_count": 2,
-  "detections": [
-    { "class": "person", "confidence": 0.87, "bbox": [0.1, 0.2, 0.3, 0.4] }
-  ],
-  "frame_path": "/frames/tenant-1/cam-1/2026-03-30T12:34:56.jpg"
+  "min_confidence": 0.5,
+  "interval_seconds": 60,
+  "emit_threshold": 0
 }
 ```
+- Conta pessoas (COCO class 0) dentro do poligono
+- Emite se contagem > threshold, respeitando intervalo
+- Evento: `analytics.people.count`
 
----
-
-## Plugin: people_count
-
-**ROI type:** `human_traffic`
-**Evento:** `analytics.people.count`
-**Modelo:** YOLOv8n
-**Classe:** person (0)
-
-### Lógica
-1. Inferência YOLO
-2. Contar pessoas com centroide dentro da ROI
-3. Emitir evento se contagem > threshold configurado
-
-### Config da ROI
+### vehicle_count
 ```json
 {
-  "emit_threshold": 0,     // emitir quando count > este valor
-  "interval_seconds": 60   // frequência mínima de emissão
+  "min_confidence": 0.5,
+  "interval_seconds": 60,
+  "emit_threshold": 0
 }
 ```
+- Conta veiculos (car=2, motorcycle=3, bus=5, truck=7)
+- Mesma logica de people_count
+- Evento: `analytics.vehicle.count`
 
-### Payload
-```json
-{
-  "roi_id": "uuid",
-  "count": 5,
-  "detections": [...],
-  "interval_start": "2026-03-30T12:34:00Z",
-  "interval_end": "2026-03-30T12:35:00Z"
-}
-```
-
----
-
-## Plugin: vehicle_count
-
-**ROI type:** `vehicle_traffic`
-**Evento:** `analytics.vehicle.count`
-**Modelo:** YOLOv8n
-**Classes:** car (2), motorcycle (3), bus (5), truck (7)
-
-Mesma lógica de `people_count`, classes diferentes.
-
----
-
-## Plugin: lpr (License Plate Recognition)
-
-**ROI type:** `lpr`
-**Evento:** `analytics.lpr.detected`
-**Modelos:** YOLOv8 plate detector + fast-plate-ocr
-**Fluxo B:** câmeras sem módulo ANPR
-
-### Lógica
-1. YOLOv8 detecta bbox da placa no frame
-2. Crop da região da placa
-3. fast-plate-ocr extrai texto
-4. Normalizar formato (AAA-1234 ou AAA1A23 Mercosul)
-5. Dedup Redis (mesmo plate + câmera < TTL = ignorar)
-6. Emitir evento
-
-### Config da ROI
+### lpr
 ```json
 {
   "min_plate_confidence": 0.7,
@@ -188,53 +99,109 @@ Mesma lógica de `people_count`, classes diferentes.
   "dedup_ttl_seconds": 60
 }
 ```
+- Detecta bbox da placa com YOLO
+- OCR com fast-plate-ocr (formato BR: AAA1234 ou AAA1A23)
+- Centroid deve estar dentro do poligono ROI
+- Dedup por placa+camera dentro do TTL
+- Evento: `analytics.lpr.detected`
 
-### Payload
+### fire_smoke / ppe_detection / biker_detection / horse_cart
 ```json
-{
-  "roi_id": "uuid",
-  "plate": "ABC1D23",
-  "plate_confidence": 0.92,
-  "ocr_confidence": 0.88,
-  "bbox": [0.1, 0.2, 0.4, 0.35],
-  "frame_path": "/frames/tenant-1/cam-1/2026-03-30T12:34:56.jpg"
-}
+{}
+```
+- Sem configuracao adicional obrigatoria
+- ROI opcional — sem ROI, detecta no frame inteiro
+- Eventos: `analytics.fire_smoke.detected`, `analytics.ppe.detected`, etc.
+
+---
+
+## 4. Interface do Plugin
+
+```python
+class AnalyticsPlugin(ABC):
+    name: str           # "intrusion_detection"
+    version: str        # "1.0.0"
+    roi_type: str       # "intrusion"
+
+    async def initialize(self, config: dict) -> None:
+        """Carrega modelo, aloca recursos."""
+
+    @abstractmethod
+    async def process_frame(
+        self,
+        frame: np.ndarray,         # RGB (H x W x 3)
+        metadata: FrameMetadata,   # camera_id, tenant_id, timestamp
+        rois: list[ROIConfig],     # Zonas ativas para esta camera
+    ) -> list[AnalyticsResult]:
+        """Processa frame e retorna deteccoes."""
+
+    async def shutdown(self) -> None:
+        """Libera recursos."""
+```
+
+### Dataclasses
+
+```python
+@dataclass
+class ROIConfig:
+    id: str
+    name: str
+    ia_type: str                          # Plugin type
+    polygon_points: list[list[float]]     # Normalizado [0.0-1.0]
+    config: dict                          # Config especifica do plugin
+
+@dataclass
+class FrameMetadata:
+    camera_id: str
+    tenant_id: str
+    timestamp: datetime
+    stream_url: str
+
+@dataclass
+class AnalyticsResult:
+    plugin: str
+    camera_id: str
+    tenant_id: str
+    event_type: str
+    payload: dict
+    occurred_at: datetime
+    confidence: float | None = None
+    roi_id: str | None = None
+```
+
+### YOLOPlugin (base para plugins YOLO)
+
+```python
+class YOLOPlugin(AnalyticsPlugin):
+    def detect(frame, conf, classes) -> list[dict]
+    def point_in_polygon(point, polygon) -> bool
+    def filter_in_roi(detections, polygon) -> list[dict]
+    def centroid(bbox) -> tuple[float, float]
 ```
 
 ---
 
-## Como Criar um Novo Plugin
+## 5. Como Criar um Novo Plugin
 
-### 1. Criar o módulo
+1. Criar diretorio `analytics/src/analytics/plugins/{nome}/`
+2. Criar `plugin.py` com classe que herda `YOLOPlugin` ou `AnalyticsPlugin`
+3. Definir `name`, `version`, `roi_type`
+4. Implementar `process_frame()`
+5. (Opcional) Colocar modelo custom em `analytics/models/`
+6. O orchestrator descobre automaticamente via scan de diretorio
 
-```
-analytics/src/analytics/plugins/
-└── meu_plugin/
-    ├── __init__.py
-    └── plugin.py
-```
-
-### 2. Implementar a interface
+Exemplo minimo:
 
 ```python
-# analytics/src/analytics/plugins/meu_plugin/plugin.py
-
+# analytics/src/analytics/plugins/my_plugin/plugin.py
+from analytics.core.yolo_base import YOLOPlugin
+from analytics.core.plugin_base import AnalyticsResult, FrameMetadata, ROIConfig
 import numpy as np
-from analytics.core.plugin_base import (
-    AnalyticsPlugin, AnalyticsResult, FrameMetadata, ROIConfig
-)
 
-class MeuPlugin(AnalyticsPlugin):
-    """Descrição do que o plugin faz."""
-
-    name = "meu_plugin"
+class MyPlugin(YOLOPlugin):
+    name = "my_plugin"
     version = "1.0.0"
-    roi_type = "meu_tipo"
-
-    async def initialize(self, config: dict) -> None:
-        """Carrega modelo e recursos."""
-        # carregar modelo aqui
-        self._modelo = ...
+    roi_type = "my_zone"
 
     async def process_frame(
         self,
@@ -242,68 +209,101 @@ class MeuPlugin(AnalyticsPlugin):
         metadata: FrameMetadata,
         rois: list[ROIConfig],
     ) -> list[AnalyticsResult]:
-        """Processa frame e retorna resultados."""
-        resultados = []
-
+        detections = self.detect(frame, conf=0.5, classes=[0])
+        results = []
         for roi in rois:
-            # lógica de detecção
-            if self._detectou_algo(frame, roi):
-                resultados.append(AnalyticsResult(
+            if roi.ia_type != self.roi_type:
+                continue
+            in_roi = self.filter_in_roi(detections, roi.polygon_points)
+            if in_roi:
+                results.append(AnalyticsResult(
                     plugin=self.name,
                     camera_id=metadata.camera_id,
                     tenant_id=metadata.tenant_id,
-                    roi_id=roi.id,
-                    event_type="analytics.meu_plugin.detected",
-                    payload={"detalhes": "..."},
+                    event_type="analytics.my_plugin.detected",
+                    payload={"count": len(in_roi), "detections": in_roi},
                     occurred_at=metadata.timestamp,
+                    confidence=max(d["confidence"] for d in in_roi),
+                    roi_id=roi.id,
                 ))
-
-        return resultados
+        return results
 ```
 
-### 3. O plugin é carregado automaticamente
-O `PluginLoader` escaneia `plugins/*/plugin.py` no startup.
-Nenhuma mudança necessária no orchestrator ou em outros arquivos.
+---
 
-### 4. Criar ROI com o tipo correto
-```json
-POST /api/v1/analytics/rois
+## 6. Variaveis de Ambiente
+
+| Variavel | Default | Descricao |
+|----------|---------|-----------|
+| VMS_API_URL | http://localhost:8000 | URL da API VMS |
+| VMS_API_KEY | dev-analytics-key | API key para auth |
+| MEDIAMTX_HOST | mediamtx | Hostname RTSP |
+| MEDIAMTX_RTSP_PORT | 8554 | Porta RTSP |
+| ANALYTICS_FPS | 1 | Frames por segundo por camera |
+| ANALYTICS_WORKERS | 4 | Workers paralelos |
+| YOLO_IMGSZ | 640 | Tamanho de inferencia YOLO |
+| YOLO_CONF | 0.30 | Threshold de confianca |
+| YOLO_MODEL_PATH | /models/object.pt | Modelo YOLO padrao |
+| FIRE_SMOKE_MODEL_PATH | /models/fire.pt | Modelo fire/smoke |
+| PPE_MODEL_PATH | /models/ppe.pt | Modelo PPE |
+| BIKER_MODEL_PATH | /models/biker_2.pt | Modelo biker |
+| HORSE_CART_MODEL_PATH | /models/horse_cart.pt | Modelo horse/cart |
+| LPR_MODEL_PATH | /models/object.pt | Detector de placa |
+| LOG_LEVEL | INFO | Nivel de log |
+
+---
+
+## 7. Fallback Local (zones.yaml)
+
+Se o analytics service nao consegue acessar a API para ROIs, carrega config local:
+
+```yaml
+# zones.yaml
+cam-123:
+  - id: "zone-1"
+    name: "Entrada"
+    ia_type: "intrusion"
+    polygon_points: [[0.1, 0.1], [0.9, 0.1], [0.9, 0.9], [0.1, 0.9]]
+    config:
+      min_confidence: 0.5
+      cooldown_seconds: 30
+```
+
+Ou via variavel: `PLUGIN_ZONES_JSON='{"cam-123": [...]}'`
+
+---
+
+## 8. Health Check
+
+```
+GET http://analytics:8001/health
+
+Response:
 {
-  "camera_id": "uuid",
-  "ia_type": "meu_tipo",
-  "polygon_points": [[...], ...],
-  "config": {}
+  "status": "healthy",
+  "plugins_loaded": 8,
+  "plugin_names": [
+    "intrusion_detection", "people_count", "vehicle_count",
+    "lpr", "fire_smoke", "ppe_detection",
+    "biker_detection", "horse_cart"
+  ]
 }
 ```
 
-### 5. Testes obrigatórios
-```python
-# tests/unit/test_meu_plugin.py
-async def test_detecta_quando_objeto_na_roi(): ...
-async def test_nao_detecta_quando_fora_da_roi(): ...
-async def test_resultado_tem_campos_obrigatorios(): ...
-async def test_exception_na_inferencia_nao_propaga(): ...
+---
+
+## 9. Dependencias
+
+```
+fastapi, uvicorn          -> API + lifespan
+httpx                     -> HTTP client para VMS API
+ultralytics               -> YOLOv8 inferencia
+opencv-python-headless    -> RTSP stream + frame capture
+fast-plate-ocr            -> OCR de placas (plugin LPR)
+numpy                     -> Manipulacao de frames
+pydantic, pydantic-settings -> Config e schemas
+structlog                 -> Logging estruturado
+redis                     -> Cache opcional
 ```
 
----
-
-## Ordem de Implementação
-
-| # | Plugin | Complexidade | GPU? | Sprint |
-|---|--------|-------------|------|--------|
-| 1 | intrusion_detection | baixa | não | 7 |
-| 2 | people_count | baixa | não | 7 |
-| 3 | vehicle_count | baixa | não | 7 |
-| 4 | lpr | média | não | 7 |
-| 5 | weapon_detection | alta | recomendado | pós-MVP |
-| 6 | face_recognition | alta (LGPD) | recomendado | pós-MVP |
-
----
-
-## Performance (200 câmeras)
-
-- 1 fps/câmera × 200 câmeras = 200 frames/s total
-- YOLOv8n no CPU: ~30ms/frame (imgsz=640)
-- 4 workers analytics = 50 frames/s cada = buffer adequado
-- Configurável: `ANALYTICS_FPS`, `ANALYTICS_WORKERS`
-- GPU opcional: com RTX 4060, throughput ~10× maior
+GPU: Dockerfile suporta CUDA 12.4 (nvidia). CPU funciona sem GPU (mais lento).

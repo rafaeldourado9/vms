@@ -3,7 +3,13 @@
     "allow": [
       "Read(//d/so/vms/mvp/frontend/src/services//**)",
       "Read(//d/so/vms/mvp/frontend/src/store//**)",
-      "Read(//d/so/vms/mvp/frontend/src/hooks//**)"
+      "Read(//d/so/vms/mvp/frontend/src/hooks//**)",
+      "Bash(wc -l D:/so/vms/mvp/docs/*.md)",
+      "Bash(grep -E \"\\\\.tsx?$\")",
+      "Bash(grep:*)",
+      "Bash(wc -l \"D:/so/vms/mvp/api/src/vms\"/*/*.py)",
+      "Bash(python -m py_compile api/src/vms/lgpd/anonymization.py api/src/vms/infrastructure/cameras/isapi_client.py api/migrations/versions/022_license_keys.py api/migrations/versions/023_merge_licenses_branch.py)",
+      "Bash(docker compose:*)"
     ]
   }
 }

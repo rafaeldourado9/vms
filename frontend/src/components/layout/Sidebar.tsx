@@ -5,6 +5,7 @@ import {
   ShieldAlert, Bell, Users, Settings,
   ChevronLeft, ChevronRight, LogOut, Scan, MapPin,
   FileText, ClipboardList, ShieldCheck, HeartPulse, BarChart3,
+  Brain,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAuthStore } from '@/store/authStore'
@@ -39,7 +40,8 @@ const NAV_SECTIONS: NavSection[] = [
   {
     label: 'Inteligência',
     items: [
-      { to: '/analytics',      icon: Scan,            label: 'Regiões (ROI)', adminOnly: true },
+      { to: '/analytics-dashboard', icon: Brain,          label: 'Analytics Dashboard' },
+      { to: '/analytics',           icon: Scan,           label: 'Regiões (ROI)', adminOnly: true },
     ],
   },
   {

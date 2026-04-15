@@ -1,15 +1,20 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Brain, ChevronLeft, ChevronRight, VideoOff } from 'lucide-react'
+import { Brain, ChevronLeft, ChevronRight, FileSearch, ShieldCheck, VideoOff } from 'lucide-react'
 import { camerasService } from '@/services/cameras'
 import { recordingsService } from '@/services/recordings'
 import { analyticsService, type AnalyticsEvent } from '@/services/analytics'
 import { VideoPlayer } from '@/components/camera/VideoPlayer'
 import { RecordingPlayer } from '@/components/camera/RecordingPlayer'
 import { ModernTimeline, type EventMarker } from '@/components/map/ModernTimeline'
+import { CustodyChainViewer } from '@/components/recordings/CustodyChainViewer'
+import { ForensicExportModal } from '@/components/recordings/ForensicExportModal'
+import { Modal } from '@/components/ui/Modal'
 import { useAuthStore } from '@/store/authStore'
 import { PLUGIN_NAMES, SEV_STYLE } from '@/constants/plugins'
 import type { Camera, RecordingSegment } from '@/types'
+import type { CustodyChainResult } from '@/services/recordings'
+import toast from 'react-hot-toast'
 
 function shiftDate(iso: string, days: number): string {
   const d = new Date(iso)
@@ -48,6 +53,13 @@ export function RecordingsPage() {
   const [cameras, setCameras]         = useState<Camera[]>([])
   const [selCam, setSelCam]           = useState<Camera | null>(null)
   const [selDate, setSelDate]         = useState(() => initDate ?? new Date().toISOString().split('T')[0])
+
+  // Cadeia de Custódia state
+  const [showCustody, setShowCustody] = useState(false)
+  const [custodyData, setCustodyData] = useState<CustodyChainResult | null>(null)
+  const [custodyLoading, setCustodyLoading] = useState(false)
+  const [showForensic, setShowForensic] = useState(false)
+  const [forensicSeg, setForensicSeg] = useState<RecordingSegment | null>(null)
   const [segments, setSegments]       = useState<RecordingSegment[]>([])
   const [loading, setLoading]         = useState(false)
   const [playbackSeg, setPlaybackSeg] = useState<RecordingSegment | null>(null)
@@ -144,6 +156,40 @@ export function RecordingsPage() {
     () => Math.round(segments.reduce((a, s) => a + s.duration_seconds, 0) / 60),
     [segments],
   )
+
+  // ── Cadeia de Custódia handlers ────────────────────────────────────
+  const handleVerifyIntegrity = async (seg: RecordingSegment) => {
+    try {
+      toast.loading('Verificando integridade...', { id: `integrity-${seg.id}` })
+      const result = await recordingsService.verifyIntegrity(seg.id)
+      if (result.verified) {
+        toast.success('Integridade verificada ✓', { id: `integrity-${seg.id}` })
+      } else {
+        toast.error('Integridade COMPROMETIDA ✗', { id: `integrity-${seg.id}` })
+      }
+    } catch {
+      toast.error('Erro ao verificar integridade', { id: `integrity-${seg.id}` })
+    }
+  }
+
+  const handleViewCustodyChain = async (seg: RecordingSegment) => {
+    setCustodyLoading(true)
+    setShowCustody(true)
+    try {
+      const data = await recordingsService.getCustodyChain(seg.id)
+      setCustodyData(data)
+    } catch {
+      toast.error('Erro ao carregar cadeia de custódia')
+      setCustodyData(null)
+    } finally {
+      setCustodyLoading(false)
+    }
+  }
+
+  const handleExportForensic = (seg: RecordingSegment) => {
+    setForensicSeg(seg)
+    setShowForensic(true)
+  }
 
   return (
     <div className="-m-4 flex flex-col h-[calc(100vh-3.5rem)]">
@@ -300,6 +346,20 @@ export function RecordingsPage() {
                 VOD
               </span>
             )}
+            <button
+              className="ml-2 p-0.5 rounded opacity-60 hover:opacity-100 transition-opacity"
+              title="Verificar integridade"
+              onClick={() => handleVerifyIntegrity(playbackSeg)}
+            >
+              <ShieldCheck size={11} />
+            </button>
+            <button
+              className="p-0.5 rounded opacity-60 hover:opacity-100 transition-opacity"
+              title="Exportar laudo forense"
+              onClick={() => handleExportForensic(playbackSeg)}
+            >
+              <FileSearch size={11} />
+            </button>
           </div>
         )}
       </div>
@@ -367,6 +427,37 @@ export function RecordingsPage() {
           </div>
         )}
       </div>
+
+      {/* ── Cadeia de Custódia: Custody Chain Modal ──────────────────── */}
+      <Modal
+        open={showCustody}
+        onClose={() => setShowCustody(false)}
+        title="Cadeia de Custódia"
+        size="md"
+      >
+        {custodyLoading ? (
+          <div className="py-8 text-center">
+            <div className="w-8 h-8 rounded-full animate-spin mx-auto" style={{ border: '2px solid var(--border)', borderTopColor: 'var(--accent)' }} />
+          </div>
+        ) : custodyData ? (
+          <CustodyChainViewer entries={custodyData.custody_chain} />
+        ) : (
+          <p className="text-sm text-t3 text-center py-8">Nenhum dado de custódia disponível</p>
+        )}
+      </Modal>
+
+      {/* ── Cadeia de Custódia: Forensic Export Modal ────────────────── */}
+      {forensicSeg && (
+        <ForensicExportModal
+          open={showForensic}
+          recordingId={forensicSeg.id}
+          recordingLabel={`${selCam?.name ?? ''} · ${fmtTime(forensicSeg.started_at)}`}
+          onClose={() => { setShowForensic(false); setForensicSeg(null) }}
+          onExported={() => {
+            handleViewCustodyChain(forensicSeg)
+          }}
+        />
+      )}
     </div>
   )
 }
