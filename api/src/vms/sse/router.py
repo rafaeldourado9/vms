@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from fastapi.responses import StreamingResponse
 from jose import JWTError
 
-from vms.core.security import decode_token
+from vms.infrastructure.security import decode_token
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

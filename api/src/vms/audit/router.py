@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, Query, status
 
 from vms.audit.repository import AuditRepository
 from vms.audit.service import AuditService
-from vms.core.deps import CurrentUser, DbSession
+from vms.shared.api.dependencies import CurrentUser, DbSession
 
 router = APIRouter(prefix="/audit", tags=["audit"])
 

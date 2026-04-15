@@ -3,9 +3,9 @@
 from fastapi import APIRouter, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from vms.core.config import get_settings
-from vms.core.deps import AdminUser, CurrentUser, DbSession
-from vms.core.rate_limit import limiter
+from vms.infrastructure.config import get_settings
+from vms.shared.api.dependencies import AdminUser, CurrentUser, DbSession
+from vms.shared.api.rate_limit import limiter
 from vms.iam.repository import ApiKeyRepository, TenantRepository, UserRepository
 from vms.iam.schemas import (
     CreateTenantRequest,
@@ -60,7 +60,7 @@ async def login(request: Request, body: LoginRequest, db: DbSession) -> TokenRes
     )
     user_model = await db.scalar(stmt)
     if not user_model:
-        from vms.core.exceptions import AuthenticationError
+        from vms.infrastructure.exceptions import AuthenticationError
         raise AuthenticationError()
 
     svc = _make_auth_service(db)

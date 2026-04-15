@@ -57,7 +57,7 @@ async def task_batch_process_segment(
         from analytics.core.file_frame_source import FileFrameSource
         from analytics.core.plugin_base import AnalyticsResult, FrameMetadata
         from analytics.core.shared_inference import SharedInferenceEngine, PLUGIN_CLASSES
-        from vms.core.config import get_settings
+        from vms.infrastructure.config import get_settings
         settings = get_settings()
 
         # Inicializar shared inference engine

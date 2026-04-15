@@ -5,7 +5,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from vms.core.deps import CurrentUser, DbSession
+from vms.shared.api.dependencies import CurrentUser, DbSession
 from vms.notifications.schemas import CreateRuleRequest, LogResponse, RuleResponse
 from vms.notifications.service import NotificationService, build_notification_service
 

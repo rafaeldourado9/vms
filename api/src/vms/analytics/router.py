@@ -8,7 +8,7 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 
-from vms.core.deps import ApiKeyHeader, CurrentUser, DbSession
+from vms.shared.api.dependencies import ApiKeyHeader, CurrentUser, DbSession
 from vms.analytics.service import AnalyticsService
 
 logger = logging.getLogger(__name__)
@@ -373,6 +373,8 @@ async def list_events(
     camera_id: str | None = Query(None),
     plugin_id: str | None = Query(None),
     severity: str | None = Query(None),
+    occurred_after: datetime | None = Query(None),
+    occurred_before: datetime | None = Query(None),
     limit: int = Query(50, ge=1, le=500),
 ) -> list[AnalyticsEventResponse]:
     """Lista eventos detectados pelos plugins do tenant."""
@@ -382,6 +384,8 @@ async def list_events(
         camera_id=camera_id,
         plugin_id=plugin_id,
         severity=severity,
+        occurred_after=occurred_after,
+        occurred_before=occurred_before,
         limit=limit,
     )
 

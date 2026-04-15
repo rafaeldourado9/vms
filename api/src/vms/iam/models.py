@@ -7,7 +7,7 @@ from sqlalchemy import BigInteger, Boolean, DateTime, ForeignKey, Integer, Strin
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from vms.core.database import Base
+from vms.infrastructure.database import Base
 
 
 def _uuid() -> str:
@@ -19,7 +19,7 @@ class TenantModel(Base):
 
     __tablename__ = "tenants"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     slug: Mapped[str] = mapped_column(String(100), unique=True, nullable=False)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -32,11 +32,9 @@ class TenantModel(Base):
     )
     
     # Billing fields (Sprint 13 — whitelabel license key)
-    license_key_id: Mapped[str | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    license_key_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), nullable=True)
     onboarding_complete: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
-    subscription_status: Mapped[str] = mapped_column(String(20), nullable=False, server_default="pending")
-    subscription_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    current_usage_cameras: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
+
 
     users: Mapped[list["UserModel"]] = relationship("UserModel", back_populates="tenant")
 
@@ -46,9 +44,9 @@ class UserModel(Base):
 
     __tablename__ = "users"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     tenant_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=False), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
     )
     email: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     hashed_password: Mapped[str] = mapped_column(String(255), nullable=False)
@@ -67,12 +65,12 @@ class ApiKeyModel(Base):
 
     __tablename__ = "api_keys"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     tenant_id: Mapped[str] = mapped_column(
-        String(36), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
+        UUID(as_uuid=False), ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False, index=True
     )
     owner_type: Mapped[str] = mapped_column(String(50), nullable=False)
-    owner_id: Mapped[str] = mapped_column(String(36), nullable=False)
+    owner_id: Mapped[str] = mapped_column(UUID(as_uuid=False), nullable=False)
     key_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     prefix: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from httpx import AsyncClient
 
-from vms.core.security import hash_password, create_access_token
+from vms.infrastructure.security import hash_password, create_access_token
 from vms.iam.models import TenantModel, UserModel
 from vms.cameras.models import CameraModel
 
@@ -47,7 +47,7 @@ class TestE2EAlprToNotification:
     """Fluxo completo: ALPR → Evento → Regra match → Dispatch."""
 
     @patch("vms.notifications.dispatcher.httpx.AsyncClient")
-    @patch("vms.core.event_bus.publish_event", new_callable=AsyncMock)
+    @patch("vms.infrastructure.messaging.publish_event", new_callable=AsyncMock)
     async def test_full_flow(
         self,
         mock_pub,
@@ -107,7 +107,7 @@ class TestE2EAlprToNotification:
 
         # 3. Simular evaluate_and_dispatch (normalmente feito pelo consumer)
         from vms.notifications.service import build_notification_service
-        from vms.core.deps import get_db
+        from vms.shared.api.dependencies import get_db
 
         async for db in app.dependency_overrides[get_db]():
             svc = build_notification_service(db)

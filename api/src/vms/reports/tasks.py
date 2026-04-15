@@ -6,7 +6,7 @@ import logging
 from vms.reports.domain import ReportType
 from vms.reports.repository import ReportRepository
 from vms.reports.service import ReportService
-from vms.core.database import get_session_factory
+from vms.infrastructure.database import get_session_factory
 
 logger = logging.getLogger(__name__)
 

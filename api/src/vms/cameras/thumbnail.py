@@ -5,7 +5,7 @@ import asyncio
 import logging
 
 from vms.cameras.domain import Camera, StreamProtocol
-from vms.core.config import get_settings
+from vms.infrastructure.config import get_settings
 
 logger = logging.getLogger(__name__)
 

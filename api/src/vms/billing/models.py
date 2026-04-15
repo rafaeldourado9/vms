@@ -54,3 +54,25 @@ class AnalyticsPricingModel(Base):
     description = Column(Text(), nullable=True)
     is_active = Column(Boolean(), nullable=False, server_default=text("true"))
     created_at = Column(DateTime(timezone=True), server_default=text("now()"))
+
+
+class LicenseModel(Base):
+    """Licença por câmera."""
+
+    __tablename__ = "licenses"
+    __table_args__ = (
+        Index('ix_licenses_tenant', 'tenant_id'),
+        Index('ix_licenses_camera', 'camera_id'),
+        Index('ix_licenses_status', 'status'),
+    )
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    tenant_id = Column(UUID(as_uuid=True), nullable=False)
+    camera_id = Column(String(100), nullable=True)
+    license_type = Column(String(30), nullable=False, server_default=text("'camera_only'"))
+    status = Column(String(20), nullable=False, server_default=text("'active'"))
+    storage_limit_gb = Column(Integer(), nullable=True)
+    analytics_enabled = Column(Boolean(), nullable=True, server_default=text("false"))
+    activated_at = Column(DateTime(timezone=True), server_default=text("now()"))
+    expires_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=text("now()"))

@@ -45,7 +45,7 @@ class RequireOnboardingMiddleware(BaseHTTPMiddleware):
         path = request.url.path
 
         # Rotas isentas
-        if any(path.startswith(ep) for ep in EXEMPT_PATH):
+        if any(path.startswith(ep) for ep in EXEMPT_PATHS):
             return await call_next(request)
 
         # Webhooks externos não exigem onboarding
@@ -68,7 +68,7 @@ class RequireOnboardingMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         # Verificar onboarding
-        from vms.core.database import get_session_factory
+        from vms.infrastructure.database import get_session_factory
 
         factory = get_session_factory()
         async with factory() as session:

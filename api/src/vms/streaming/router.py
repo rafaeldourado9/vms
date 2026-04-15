@@ -7,7 +7,7 @@ from urllib.parse import parse_qs
 from fastapi import APIRouter, HTTPException, Query, Request, status
 
 from vms.cameras.repository import CameraRepository
-from vms.core.deps import DbSession
+from vms.shared.api.dependencies import DbSession
 from vms.iam.repository import ApiKeyRepository
 from vms.streaming.ports import StreamAuthPort, StreamCameraPort
 from vms.streaming.repository import StreamSessionRepository

@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
 from vms.shared.events import DomainEvent
-from vms.shared.kernel import AuditId, EntityId, TenantId
+from vms.shared.kernel import AggregateRoot, AuditId, EntityId, TenantId
 
 
 @dataclass(frozen=True)
@@ -19,7 +19,7 @@ class AuditLogCreated(DomainEvent):
 
 
 @dataclass
-class AuditLog:
+class AuditLog(AggregateRoot):
     """
     Log de auditoria — registro imutável de uma ação no sistema.
 

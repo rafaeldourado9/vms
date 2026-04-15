@@ -2,8 +2,8 @@
 
 import uuid
 
-from vms.core.exceptions import AuthenticationError, ConflictError, NotFoundError
-from vms.core.security import (
+from vms.shared.exceptions import UnauthorizedError, DuplicateError, NotFoundError
+from vms.infrastructure.security import (
     create_access_token,
     create_refresh_token,
     decode_token,
@@ -27,11 +27,11 @@ class TenantService:
         """
         Cria novo tenant.
 
-        Lança ConflictError se o slug já estiver em uso.
+        Lança DuplicateError se o slug já estiver em uso.
         """
         existing = await self._tenants.get_by_slug(slug)
         if existing:
-            raise ConflictError(f"Slug '{slug}' já está em uso")
+            raise DuplicateError(f"Slug '{slug}' já está em uso")
 
         tenant = Tenant(
             id=str(uuid.uuid4()),
@@ -71,7 +71,7 @@ class UserService:
         Cria usuário no tenant.
 
         Lança NotFoundError se o tenant não existir.
-        Lança ConflictError se o email já estiver em uso no tenant.
+        Lança DuplicateError se o email já estiver em uso no tenant.
         """
         tenant = await self._tenants.get_by_id(tenant_id)
         if not tenant:
@@ -79,7 +79,7 @@ class UserService:
 
         existing = await self._users.get_by_email(email, tenant_id)
         if existing:
-            raise ConflictError(f"Email '{email}' já cadastrado neste tenant")
+            raise DuplicateError(f"Email '{email}' já cadastrado neste tenant")
 
         user = User(
             id=str(uuid.uuid4()),
@@ -119,14 +119,14 @@ class AuthService:
         """
         Autentica usuário e retorna (access_token, refresh_token).
 
-        Lança AuthenticationError se credenciais inválidas.
+        Lança UnauthorizedError se credenciais inválidas.
         """
         user = await self._users.get_by_email(email, tenant_id)
         if not user or not user.is_active:
-            raise AuthenticationError()
+            raise UnauthorizedError()
 
         if not verify_password(password, user.hashed_password):
-            raise AuthenticationError()
+            raise UnauthorizedError()
 
         access = create_access_token(user.id, user.tenant_id, user.role.value)
         refresh = create_refresh_token(user.id, user.tenant_id)
@@ -136,45 +136,45 @@ class AuthService:
         """
         Renova tokens a partir de um refresh token válido.
 
-        Lança AuthenticationError se o refresh token for inválido.
+        Lança UnauthorizedError se o refresh token for inválido.
         """
         try:
             payload = decode_token(refresh_token)
             if payload.get("type") != "refresh":
-                raise AuthenticationError("Token de refresh inválido")
+                raise UnauthorizedError("Token de refresh inválido")
 
             user = await self._users.get_by_id(payload["sub"], payload["tenant_id"])
             if not user or not user.is_active:
-                raise AuthenticationError("Usuário inativo")
+                raise UnauthorizedError("Usuário inativo")
 
             access = create_access_token(user.id, user.tenant_id, user.role.value)
             new_refresh = create_refresh_token(user.id, user.tenant_id)
             return access, new_refresh
 
         except KeyError as exc:
-            raise AuthenticationError("Claims do token ausentes") from exc
+            raise UnauthorizedError("Claims do token ausentes") from exc
         except Exception as exc:
-            raise AuthenticationError("Token de refresh inválido") from exc
+            raise UnauthorizedError("Token de refresh inválido") from exc
 
     async def issue_viewer_token(self, tenant_id: str, camera_id: str) -> str:
         """Emite token JWT de curta duração para um viewer de stream."""
-        from vms.core.security import create_viewer_token
+        from vms.infrastructure.security import create_viewer_token
         return create_viewer_token(tenant_id, camera_id)
 
     async def authenticate_api_key(self, plain_key: str) -> ApiKey:
         """
         Autentica API key e retorna entidade.
 
-        Lança AuthenticationError se a key for inválida ou revogada.
+        Lança UnauthorizedError se a key for inválida ou revogada.
         """
         prefix = extract_key_prefix(plain_key)
         api_key = await self._api_keys.get_by_prefix(prefix)
 
         if not api_key or not api_key.is_active:
-            raise AuthenticationError("API key inválida")
+            raise UnauthorizedError("API key inválida")
 
         if not verify_api_key(plain_key, api_key.key_hash):
-            raise AuthenticationError("API key inválida")
+            raise UnauthorizedError("API key inválida")
 
         # Atualiza last_used de forma assíncrona (best-effort)
         await self._api_keys.update_last_used(api_key.id)

@@ -7,9 +7,9 @@ from datetime import UTC, datetime, timedelta
 
 from vms.cameras.domain import Camera
 from vms.cameras.repository import CameraRepositoryPort
-from vms.core.config import get_settings
-from vms.core.exceptions import NotFoundError
-from vms.core.security import create_viewer_token
+from vms.infrastructure.config import get_settings
+from vms.shared.exceptions import NotFoundError
+from vms.infrastructure.security import create_viewer_token
 
 logger = logging.getLogger(__name__)
 
@@ -90,7 +90,7 @@ class PluginService:
         await db.commit()
 
         try:
-            from vms.core.event_bus import publish_event
+            from vms.infrastructure.messaging import publish_event
 
             await publish_event(
                 event_type,

@@ -5,7 +5,7 @@ import asyncio
 from datetime import datetime, timezone
 
 from sqlalchemy import text
-from vms.core.database import get_session_factory
+from vms.infrastructure.database import get_session_factory
 
 
 async def seed_billing_plans() -> None:

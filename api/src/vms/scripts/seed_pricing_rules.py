@@ -4,7 +4,7 @@ from __future__ import annotations
 import asyncio
 
 from sqlalchemy import text
-from vms.core.database import get_session_factory
+from vms.infrastructure.database import get_session_factory
 
 
 async def seed_pricing_rules() -> None:

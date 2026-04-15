@@ -9,8 +9,8 @@ import redis.asyncio as aioredis
 from fastapi import APIRouter
 from sqlalchemy import func, select, text
 
-from vms.core.config import get_settings
-from vms.core.database import get_session_factory
+from vms.infrastructure.config import get_settings
+from vms.infrastructure.database import get_session_factory
 
 logger = logging.getLogger(__name__)
 router = APIRouter()

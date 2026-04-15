@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
 )
 
-from vms.core.database import Base, init_db
+from vms.infrastructure.database import Base, init_db
 
 _TEST_DB_URL = "sqlite+aiosqlite:///:memory:"
 
@@ -118,7 +118,7 @@ def bdd_client(bdd_engine, bdd_session_factory) -> SyncHttpClient:
                 await session.rollback()
                 raise
 
-    from vms.core.deps import get_db
+    from vms.shared.api.dependencies import get_db
     test_app.dependency_overrides[get_db] = override_get_db
     test_app.state.redis = AsyncMock(spec=aioredis.Redis)
     test_app.state.arq_redis = AsyncMock()

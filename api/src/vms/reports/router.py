@@ -6,7 +6,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Query, status
 from fastapi.responses import FileResponse
 
-from vms.core.deps import CurrentUser, DbSession
+from vms.shared.api.dependencies import CurrentUser, DbSession
 from vms.reports.domain import ReportType
 from vms.reports.repository import ReportRepository
 from vms.reports.schemas import CreateReportRequest, ReportListResponse, ReportResponse

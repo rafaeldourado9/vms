@@ -7,7 +7,7 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from vms.core.deps import AdminUser, CurrentUser, DbSession
+from vms.shared.api.dependencies import AdminUser, CurrentUser, DbSession
 from vms.infrastructure.middleware.audit_action import audit_action
 from vms.lgpd.anonymization import AnonymizationService
 from vms.lgpd.domain import (

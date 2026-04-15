@@ -47,7 +47,6 @@ class AnonymizationService:
             payload={},  # Remove payload com dados extras
             occurred_at=func.date_trunc('day', VmsEventModel.occurred_at),  # Trunca para o dia
         )
-        # Nota: func precisa ser importado de sqlalchemy
 
         try:
             await self._session.execute(stmt)

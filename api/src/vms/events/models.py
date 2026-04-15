@@ -6,9 +6,10 @@ from datetime import datetime
 
 from sqlalchemy import DateTime, Float, ForeignKey, Index, String, func
 from sqlalchemy import JSON as JSONB  # Compatível com SQLite para testes
+from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from vms.core.database import Base
+from vms.infrastructure.database import Base
 
 
 def _uuid() -> str:
@@ -25,15 +26,15 @@ class VmsEventModel(Base):
         Index("ix_vms_events_plate", "plate"),
     )
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     tenant_id: Mapped[str] = mapped_column(
-        String(36),
+        UUID(as_uuid=False),
         ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     camera_id: Mapped[str | None] = mapped_column(
-        String(36),
+        UUID(as_uuid=False),
         ForeignKey("cameras.id", ondelete="SET NULL"),
         nullable=True,
         index=True,

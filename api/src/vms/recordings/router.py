@@ -6,7 +6,7 @@ from datetime import datetime, timezone, timedelta
 
 from fastapi import APIRouter, HTTPException, Query, status
 
-from vms.core.deps import CurrentUser, DbSession
+from vms.shared.api.dependencies import CurrentUser, DbSession
 from vms.infrastructure.middleware.audit_action import audit_action
 from vms.recordings.repository import ClipRepository, RecordingSegmentRepository
 from vms.recordings.schemas import (

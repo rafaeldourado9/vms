@@ -7,7 +7,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from pytest_bdd import given, when, then, scenarios, parsers
 
-from vms.core.security import hash_password
+from vms.infrastructure.security import hash_password
 from vms.iam.models import TenantModel, UserModel
 
 scenarios("../features/cameras.feature")

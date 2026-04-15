@@ -4,7 +4,7 @@ from __future__ import annotations
 import pytest
 from httpx import AsyncClient
 
-from vms.core.security import hash_password, create_access_token
+from vms.infrastructure.security import hash_password, create_access_token
 from vms.iam.models import TenantModel, UserModel
 
 

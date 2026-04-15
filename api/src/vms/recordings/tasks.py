@@ -7,7 +7,7 @@ import re
 import arq
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from vms.core.database import get_session_factory
+from vms.infrastructure.database import get_session_factory
 from vms.recordings.repository import ClipRepository, RecordingSegmentRepository
 from vms.recordings.service import RecordingService
 
@@ -46,7 +46,7 @@ async def task_index_segment(
             await session.rollback()
             logger.exception("Erro ao indexar segmento: %s", file_path)
             try:
-                from vms.core.dlq import record_failure
+                from vms.infrastructure.messaging import record_failure
                 await record_failure(
                     ctx["redis"], "task_index_segment", file_path, str(exc),
                 )

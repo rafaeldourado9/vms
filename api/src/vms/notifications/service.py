@@ -5,7 +5,7 @@ import uuid
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from vms.core.exceptions import NotFoundError
+from vms.shared.exceptions import NotFoundError
 from vms.notifications.dispatcher import dispatch_webhook
 from vms.notifications.domain import NotificationLog, NotificationRule
 from vms.notifications.repository import (

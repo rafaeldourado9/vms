@@ -8,7 +8,7 @@ from sqlalchemy import JSON, Boolean, Float, ForeignKey, Integer, String, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from vms.core.database import Base
+from vms.infrastructure.database import Base
 
 
 class AnalyticsROI(Base):

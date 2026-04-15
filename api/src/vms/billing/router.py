@@ -5,13 +5,13 @@ import logging
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException, Query, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from vms.billing.domain import VmsLicense, LicenseStatus, DeploymentModel
 from vms.billing.models import LicenseKeyModel, AnalyticsPricingModel
 from vms.billing.repository import LicenseRepository
 from vms.billing.service import LicenseService
-from vms.core.deps import CurrentUser, DbSession, AdminUser
+from vms.shared.api.dependencies import CurrentUser, DbSession, AdminUser
 from vms.iam.models import TenantModel
 
 logger = logging.getLogger(__name__)
@@ -66,10 +66,14 @@ async def get_invoice(claims: CurrentUser, db: DbSession) -> dict:
 
     # Storage: apenas managed — R$50/cam/mês
     if key.deployment_model == "managed":
-        storage_cost = tenant.current_usage_cameras * 50.00
+        from vms.cameras.models import CameraModel
+        cam_count = await db.scalar(
+            select(func.count(CameraModel.id)).where(CameraModel.tenant_id == claims.tenant_id)
+        ) or 0
+        storage_cost = cam_count * 50.00
         items.append({
             "item": "Storage",
-            "detail": f"{tenant.current_usage_cameras} câmeras × R$ 50,00/mês",
+            "detail": f"{cam_count} câmeras × R$ 50,00/mês",
             "total": storage_cost,
         })
 
@@ -152,8 +156,6 @@ async def activate_license(body: dict, claims: CurrentUser, db: DbSession) -> di
 
     tenant.onboarding_complete = True
     tenant.license_key_id = key_model.id
-    tenant.subscription_status = "active"
-    tenant.subscription_started_at = datetime.now(timezone.utc)
 
     # Criar licenças de câmera iniciais
     license_svc = LicenseService(LicenseRepository(db))

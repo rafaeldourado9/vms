@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 # Identificadores da revisão
 revision: str = "001"
@@ -22,7 +23,7 @@ def upgrade() -> None:
     # 1. tenants
     op.create_table(
         "tenants",
-        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("slug", sa.String(100), nullable=False, unique=True),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
@@ -35,8 +36,8 @@ def upgrade() -> None:
     # 2. users
     op.create_table(
         "users",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("tenant_id", sa.String(36), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True),
+        sa.Column("tenant_id", postgresql.UUID(as_uuid=False), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
         sa.Column("email", sa.String(255), nullable=False),
         sa.Column("hashed_password", sa.String(255), nullable=False),
         sa.Column("full_name", sa.String(255), nullable=False),
@@ -50,10 +51,10 @@ def upgrade() -> None:
     # 3. api_keys
     op.create_table(
         "api_keys",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("tenant_id", sa.String(36), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True),
+        sa.Column("tenant_id", postgresql.UUID(as_uuid=False), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
         sa.Column("owner_type", sa.String(50), nullable=False),
-        sa.Column("owner_id", sa.String(36), nullable=False),
+        sa.Column("owner_id", postgresql.UUID(as_uuid=False), nullable=False),
         sa.Column("key_hash", sa.String(255), nullable=False),
         sa.Column("prefix", sa.String(20), nullable=False),
         sa.Column("is_active", sa.Boolean(), nullable=False, server_default=sa.text("true")),
@@ -66,8 +67,8 @@ def upgrade() -> None:
     # 4. agents
     op.create_table(
         "agents",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("tenant_id", sa.String(36), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True),
+        sa.Column("tenant_id", postgresql.UUID(as_uuid=False), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("status", sa.String(50), nullable=False, server_default="pending"),
         sa.Column("last_heartbeat_at", sa.DateTime(timezone=True), nullable=True),
@@ -81,9 +82,9 @@ def upgrade() -> None:
     # 5. cameras
     op.create_table(
         "cameras",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("tenant_id", sa.String(36), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("agent_id", sa.String(36), sa.ForeignKey("agents.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True),
+        sa.Column("tenant_id", postgresql.UUID(as_uuid=False), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("agent_id", postgresql.UUID(as_uuid=False), sa.ForeignKey("agents.id", ondelete="SET NULL"), nullable=True),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("location", sa.String(500), nullable=True),
         sa.Column("rtsp_url", sa.String(2000), nullable=False),
@@ -100,9 +101,9 @@ def upgrade() -> None:
     # 6. vms_events
     op.create_table(
         "vms_events",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("tenant_id", sa.String(36), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("camera_id", sa.String(36), sa.ForeignKey("cameras.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True),
+        sa.Column("tenant_id", postgresql.UUID(as_uuid=False), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("camera_id", postgresql.UUID(as_uuid=False), sa.ForeignKey("cameras.id", ondelete="SET NULL"), nullable=True),
         sa.Column("event_type", sa.String(100), nullable=False),
         sa.Column("plate", sa.String(20), nullable=True),
         sa.Column("confidence", sa.Float(), nullable=True),
@@ -118,9 +119,9 @@ def upgrade() -> None:
     # 7. recording_segments
     op.create_table(
         "recording_segments",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("tenant_id", sa.String(36), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("camera_id", sa.String(36), sa.ForeignKey("cameras.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True),
+        sa.Column("tenant_id", postgresql.UUID(as_uuid=False), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("camera_id", postgresql.UUID(as_uuid=False), sa.ForeignKey("cameras.id", ondelete="CASCADE"), nullable=False),
         sa.Column("mediamtx_path", sa.String(500), nullable=False),
         sa.Column("file_path", sa.String(1000), nullable=False),
         sa.Column("started_at", sa.DateTime(timezone=True), nullable=False),
@@ -141,14 +142,14 @@ def upgrade() -> None:
     # 8. clips
     op.create_table(
         "clips",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("tenant_id", sa.String(36), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("camera_id", sa.String(36), sa.ForeignKey("cameras.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True),
+        sa.Column("tenant_id", postgresql.UUID(as_uuid=False), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("camera_id", postgresql.UUID(as_uuid=False), sa.ForeignKey("cameras.id", ondelete="CASCADE"), nullable=False),
         sa.Column("starts_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("ends_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("status", sa.String(50), nullable=False, server_default="pending"),
         sa.Column("file_path", sa.String(1000), nullable=True),
-        sa.Column("vms_event_id", sa.String(36), sa.ForeignKey("vms_events.id", ondelete="SET NULL"), nullable=True),
+        sa.Column("vms_event_id", postgresql.UUID(as_uuid=False), sa.ForeignKey("vms_events.id", ondelete="SET NULL"), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
     )
     op.create_index("ix_clips_tenant_id", "clips", ["tenant_id"])
@@ -158,8 +159,8 @@ def upgrade() -> None:
     # 9. notification_rules
     op.create_table(
         "notification_rules",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("tenant_id", sa.String(36), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True),
+        sa.Column("tenant_id", postgresql.UUID(as_uuid=False), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("event_type_pattern", sa.String(200), nullable=False),
         sa.Column("destination_url", sa.String(2000), nullable=False),
@@ -172,10 +173,10 @@ def upgrade() -> None:
     # 10. notification_logs
     op.create_table(
         "notification_logs",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("tenant_id", sa.String(36), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("rule_id", sa.String(36), sa.ForeignKey("notification_rules.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("vms_event_id", sa.String(36), sa.ForeignKey("vms_events.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True),
+        sa.Column("tenant_id", postgresql.UUID(as_uuid=False), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("rule_id", postgresql.UUID(as_uuid=False), sa.ForeignKey("notification_rules.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("vms_event_id", postgresql.UUID(as_uuid=False), sa.ForeignKey("vms_events.id", ondelete="CASCADE"), nullable=False),
         sa.Column("status", sa.String(50), nullable=False),
         sa.Column("response_code", sa.Integer(), nullable=True),
         sa.Column("response_body", sa.Text(), nullable=True),
@@ -189,9 +190,9 @@ def upgrade() -> None:
     # 11. regions_of_interest
     op.create_table(
         "regions_of_interest",
-        sa.Column("id", sa.String(36), primary_key=True),
-        sa.Column("tenant_id", sa.String(36), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("camera_id", sa.String(36), sa.ForeignKey("cameras.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True),
+        sa.Column("tenant_id", postgresql.UUID(as_uuid=False), sa.ForeignKey("tenants.id", ondelete="CASCADE"), nullable=False),
+        sa.Column("camera_id", postgresql.UUID(as_uuid=False), sa.ForeignKey("cameras.id", ondelete="CASCADE"), nullable=False),
         sa.Column("name", sa.String(255), nullable=False),
         sa.Column("ia_type", sa.String(100), nullable=False),
         sa.Column("polygon_points", sa.JSON(), nullable=False, server_default="[]"),

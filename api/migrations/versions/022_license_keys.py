@@ -11,8 +11,8 @@ from alembic import op
 import sqlalchemy as sa
 from sqlalchemy.dialects import postgresql
 
-revision: str = '021'
-down_revision: Union[str, None] = '020'
+revision: str = '022'
+down_revision: Union[str, None] = '021'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
@@ -49,9 +49,9 @@ def upgrade() -> None:
         sa.UniqueConstraint('plugin_name', name='uq_analytics_pricing_plugin'),
     )
 
-    # 3. tenant: onboarding_complete + license_key_id
-    op.add_column('tenants', sa.Column('onboarding_complete', sa.Boolean(), nullable=False, server_default=sa.text("false")))
-    op.add_column('tenants', sa.Column('license_key_id', postgresql.UUID(as_uuid=True), nullable=True))
+    # 3. tenant: onboarding_complete + license_key_id (idempotente — 021 já pode ter adicionado onboarding_complete)
+    op.execute("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS onboarding_complete BOOLEAN NOT NULL DEFAULT false")
+    op.execute("ALTER TABLE tenants ADD COLUMN IF NOT EXISTS license_key_id UUID NULL")
 
 
 def downgrade() -> None:

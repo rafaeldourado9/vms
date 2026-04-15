@@ -35,8 +35,8 @@ async def _run() -> None:
     from vms.cameras.domain import CameraManufacturer, StreamProtocol
     from vms.cameras.models import CameraModel
     from vms.cameras.mediamtx import MediaMTXClient
-    from vms.core.database import close_db, create_engine, get_db_context, init_db
-    from vms.core.security import hash_password
+    from vms.infrastructure.database import close_db, create_engine, get_db_context, init_db
+    from vms.infrastructure.security import hash_password
     from vms.iam.models import TenantModel, UserModel
     import secrets
 

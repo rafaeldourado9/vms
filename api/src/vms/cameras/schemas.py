@@ -20,8 +20,8 @@ class CreateCameraRequest(BaseModel):
     ia_enabled: bool = False
     manufacturer: str = Field(default="generic")
     retention_days: int = Field(default=7, ge=1, le=90)
-    stream_quality: StreamQuality = StreamQuality.HIGH
-    stream_protocol: StreamProtocol = StreamProtocol.RTSP_PULL
+    stream_quality: str = StreamQuality.HIGH
+    stream_protocol: str = StreamProtocol.RTSP_PULL
 
     # rtsp_pull / onvif
     rtsp_url: str | None = Field(default=None, min_length=10, max_length=2000)
@@ -67,7 +67,7 @@ class UpdateCameraRequest(BaseModel):
     latitude: float | None = Field(default=None, ge=-90, le=90)
     longitude: float | None = Field(default=None, ge=-180, le=180)
     ia_enabled: bool | None = None
-    stream_quality: StreamQuality | None = None
+    stream_quality: str | None = None
     rtsp_url: str | None = Field(default=None, min_length=10, max_length=2000)
 
     @field_validator("rtsp_url", mode="before")

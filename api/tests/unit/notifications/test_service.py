@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from vms.core.exceptions import NotFoundError
+from vms.shared.exceptions import NotFoundError
 from vms.notifications.domain import (
     NotificationLog,
     NotificationRule,

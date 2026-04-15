@@ -179,10 +179,17 @@ class ISAPIClient:
         """Faz probe completo: info, capacidades, modelo, firmware."""
         info = await self.get_device_info()
         caps = await self.get_capabilities()
+        # xmltodict envolve no elemento raiz (ex: {"DeviceInfo": {...}}); desembrulha
+        info_body = info.get("DeviceInfo", info) if isinstance(info, dict) else {}
         return {
             "info": info,
             "capabilities": caps,
-            "model_name": info.get("DeviceName") or info.get("model") or "Unknown",
-            "serial_number": info.get("serialNumber") or "Unknown",
-            "firmware_version": info.get("firmwareVersion") or "Unknown",
+            "model_name": (
+                info_body.get("deviceName")
+                or info_body.get("model")
+                or info_body.get("DeviceName")
+                or "Unknown"
+            ),
+            "serial_number": info_body.get("serialNumber") or "Unknown",
+            "firmware_version": info_body.get("firmwareVersion") or "Unknown",
         }

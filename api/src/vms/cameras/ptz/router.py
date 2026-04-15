@@ -8,8 +8,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from vms.cameras.ptz.domain import PtzCommand, PtzPreset
 from vms.cameras.ptz.service import PtzService
 from vms.cameras.repository import CameraRepository
-from vms.core.deps import CurrentUser, DbSession
-from vms.core.exceptions import NotFoundError, ValidationError
+from vms.shared.api.dependencies import CurrentUser, DbSession
+from vms.shared.exceptions import NotFoundError, ValidationError
 
 router = APIRouter()
 

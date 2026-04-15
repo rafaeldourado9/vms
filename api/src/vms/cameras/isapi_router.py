@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, status
 
 from vms.cameras.domain import Camera
 from vms.cameras.repository import CameraRepository
-from vms.core.deps import CurrentUser, DbSession
+from vms.shared.api.dependencies import CurrentUser, DbSession
 from vms.infrastructure.cameras.isapi_client import ISAPIClient
 from vms.infrastructure.config import get_settings
 

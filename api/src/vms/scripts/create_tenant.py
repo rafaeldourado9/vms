@@ -31,8 +31,8 @@ def _parse_args() -> argparse.Namespace:
 async def _run(name: str, slug: str, admin_email: str, admin_password: str) -> None:
     """Executa a criação do tenant, usuário admin e agente nativo."""
     from vms.cameras.models import AgentModel
-    from vms.core.database import close_db, create_engine, get_db_context, init_db
-    from vms.core.security import generate_api_key, hash_password
+    from vms.infrastructure.database import close_db, create_engine, get_db_context, init_db
+    from vms.infrastructure.security import generate_api_key, hash_password
     from vms.iam.models import ApiKeyModel, TenantModel, UserModel
 
     engine = create_engine()

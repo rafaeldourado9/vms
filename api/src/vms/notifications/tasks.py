@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from vms.core.database import get_session_factory
+from vms.infrastructure.database import get_session_factory
 from vms.notifications.repository import NotificationRuleRepository
 from vms.notifications.dispatcher import dispatch_webhook
 from vms.notifications.repository import NotificationLogRepository
@@ -65,7 +65,7 @@ async def task_dispatch_notification(
             logger.exception("Erro ao despachar notificação: rule=%s event=%s", rule_id, event_id)
             # Registra falha na DLQ
             try:
-                from vms.core.dlq import record_failure
+                from vms.infrastructure.messaging import record_failure
                 job_id = ctx.get("job_id", f"{rule_id}:{event_id}")
                 await record_failure(
                     ctx["redis"],

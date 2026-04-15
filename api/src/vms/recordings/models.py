@@ -5,10 +5,10 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import DateTime, Float, ForeignKey, Index, Integer, String, Text, func
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
-from vms.core.database import Base
+from vms.infrastructure.database import Base
 
 
 def _uuid() -> str:
@@ -24,15 +24,15 @@ class RecordingSegmentModel(Base):
         Index("ix_recording_segments_tenant_camera_started", "tenant_id", "camera_id", "started_at"),
     )
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     tenant_id: Mapped[str] = mapped_column(
-        String(36),
+        UUID(as_uuid=False),
         ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     camera_id: Mapped[str] = mapped_column(
-        String(36),
+        UUID(as_uuid=False),
         ForeignKey("cameras.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -62,15 +62,15 @@ class ClipModel(Base):
         Index("ix_clips_tenant_camera", "tenant_id", "camera_id"),
     )
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     tenant_id: Mapped[str] = mapped_column(
-        String(36),
+        UUID(as_uuid=False),
         ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     camera_id: Mapped[str] = mapped_column(
-        String(36),
+        UUID(as_uuid=False),
         ForeignKey("cameras.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -80,7 +80,7 @@ class ClipModel(Base):
     status: Mapped[str] = mapped_column(String(50), nullable=False, default="pending")
     file_path: Mapped[str | None] = mapped_column(String(1000), nullable=True)
     vms_event_id: Mapped[str | None] = mapped_column(
-        String(36),
+        UUID(as_uuid=False),
         ForeignKey("vms_events.id", ondelete="SET NULL"),
         nullable=True,
     )

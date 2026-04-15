@@ -6,7 +6,7 @@ import logging
 import arq
 from arq.connections import RedisSettings
 
-from vms.core.config import get_settings
+from vms.infrastructure.config import get_settings
 from vms.recordings.tasks import task_cleanup_old_segments, task_index_segment
 from vms.notifications.tasks import task_dispatch_notification
 from vms.reports.tasks import task_generate_report
@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 async def startup(ctx: dict) -> None:
     """Inicializa recursos compartilhados para o worker."""
     import redis.asyncio as aioredis
-    from vms.core.database import create_engine, init_db
+    from vms.infrastructure.database import create_engine, init_db
 
     settings = get_settings()
 
@@ -35,7 +35,7 @@ async def startup(ctx: dict) -> None:
 
 async def shutdown(ctx: dict) -> None:
     """Fecha recursos do worker."""
-    from vms.core.database import close_db
+    from vms.infrastructure.database import close_db
 
     if "redis" in ctx:
         await ctx["redis"].aclose()

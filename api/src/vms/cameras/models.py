@@ -5,10 +5,10 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, func
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
-from vms.core.database import Base
+from vms.infrastructure.database import Base
 
 
 def _uuid() -> str:
@@ -21,9 +21,9 @@ class AgentModel(Base):
 
     __tablename__ = "agents"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     tenant_id: Mapped[str] = mapped_column(
-        String(36),
+        UUID(as_uuid=False),
         ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
@@ -50,15 +50,15 @@ class CameraModel(Base):
 
     __tablename__ = "cameras"
 
-    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=_uuid)
+    id: Mapped[str] = mapped_column(UUID(as_uuid=False), primary_key=True, default=_uuid)
     tenant_id: Mapped[str] = mapped_column(
-        String(36),
+        UUID(as_uuid=False),
         ForeignKey("tenants.id", ondelete="CASCADE"),
         nullable=False,
         index=True,
     )
     agent_id: Mapped[str | None] = mapped_column(
-        String(36),
+        UUID(as_uuid=False),
         ForeignKey("agents.id", ondelete="SET NULL"),
         nullable=True,
         index=True,

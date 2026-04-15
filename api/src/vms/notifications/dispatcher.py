@@ -6,7 +6,7 @@ import uuid
 import httpx
 from datetime import UTC, datetime
 
-from vms.core.security import sign_webhook_payload
+from vms.infrastructure.security import sign_webhook_payload
 from vms.notifications.domain import NotificationLog, NotificationRule, NotificationStatus
 
 logger = logging.getLogger(__name__)

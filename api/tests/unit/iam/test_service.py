@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from vms.core.exceptions import AuthenticationError, ConflictError, NotFoundError
-from vms.core.security import hash_password
+from vms.shared.exceptions import AuthenticationError, ConflictError, NotFoundError
+from vms.infrastructure.security import hash_password
 from vms.iam.domain import ApiKey, ApiKeyOwnerType, Tenant, User, UserRole
 from vms.iam.service import ApiKeyService, AuthService, TenantService, UserService
 
@@ -207,7 +207,7 @@ class TestAuthService:
 
     async def test_refresh_token_ok(self, svc):
         """Refresh com token válido retorna novos tokens."""
-        from vms.core.security import create_refresh_token
+        from vms.infrastructure.security import create_refresh_token
 
         refresh = create_refresh_token("u1", "t1")
         access, new_refresh = await svc.refresh_access_token(refresh)
@@ -221,7 +221,7 @@ class TestAuthService:
 
     async def test_refresh_with_access_token_fails(self, svc):
         """Usar access token como refresh lança AuthenticationError."""
-        from vms.core.security import create_access_token
+        from vms.infrastructure.security import create_access_token
 
         access = create_access_token("u1", "t1", "admin")
         with pytest.raises(AuthenticationError):

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from alembic import op
 import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 revision: str = "005"
 down_revision: str = "004"
@@ -22,16 +23,16 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.create_table(
         "regions_of_interest",
-        sa.Column("id", sa.String(36), primary_key=True),
+        sa.Column("id", postgresql.UUID(as_uuid=False), primary_key=True),
         sa.Column(
             "tenant_id",
-            sa.String(36),
+            postgresql.UUID(as_uuid=False),
             sa.ForeignKey("tenants.id", ondelete="CASCADE"),
             nullable=False,
         ),
         sa.Column(
             "camera_id",
-            sa.String(36),
+            postgresql.UUID(as_uuid=False),
             sa.ForeignKey("cameras.id", ondelete="CASCADE"),
             nullable=False,
         ),

@@ -71,9 +71,9 @@ class TestStreamingService:
             stream_protocol=StreamProtocol.RTMP_PUSH,
             rtmp_stream_key="correct-stream-key",
         )
-        camera_repo = AsyncMock()
-        camera_repo.get_by_id = AsyncMock(return_value=camera)
-        svc = StreamingService(repo, camera_repo=camera_repo)
+        camera_port = AsyncMock()
+        camera_port.get_by_id = AsyncMock(return_value=camera)
+        svc = StreamingService(repo, camera_port=camera_port)
 
         result = await svc.verify_publish_token("tenant-t1/cam-c1", "correct-stream-key")
         assert result is True

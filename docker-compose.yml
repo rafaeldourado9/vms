@@ -134,7 +134,7 @@ services:
   analytics:
     build:
       context: ./analytics
-      target: production
+      target: ${ANALYTICS_TARGET:-cpu}   # cpu para dev, gpu para produção
     restart: unless-stopped
     environment:
       - VMS_API_URL=http://api:8000
@@ -157,7 +157,7 @@ services:
       - mediamtx
       - redis
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8001/health').raise_for_status()"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -169,6 +169,30 @@ services:
       context: ./frontend
     restart: unless-stopped
     networks: [vms]
+
+  # ─── Edge Agent (captura RTSP e envia para MediaMTX) ──────────────────────
+  edge-agent:
+    build:
+      context: ./edge_agent
+    restart: unless-stopped
+    environment:
+      - AGENT_ID=edge-agent-01
+      - AGENT_API_KEY=${VMS_API_KEY:-dev-analytics-key}
+      - VMS_API_URL=http://api:8000
+      - MEDIAMTX_RTMP_URL=rtmp://mediamtx:1935
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - edge_agent_data:/app/data
+    depends_on:
+      - api
+      - mediamtx
+    healthcheck:
+      test: ["CMD", "python", "-c", "print('agent running')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    networks: [vms]
+    profiles: [agent]          # `docker compose --profile agent up`
 
   # ─── Nginx (reverse proxy) ────────────────────────────────────────────────
   nginx:
@@ -266,6 +290,7 @@ volumes:
   vod_streams:
   backups:
   tunnel_data:
+  edge_agent_data:
 
 networks:
   vms:

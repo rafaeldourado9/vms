@@ -18,20 +18,20 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     op.add_column(
-        'recording_segment',
+        'recording_segments',
         sa.Column('analytics_processed', sa.Boolean(), nullable=True, server_default='false'),
     )
     op.add_column(
-        'recording_segment',
+        'recording_segments',
         sa.Column('analytics_plugins_processed', postgresql.JSONB(), nullable=True, server_default='[]'),
     )
     op.add_column(
-        'recording_segment',
+        'recording_segments',
         sa.Column('analytics_processed_at', sa.DateTime(timezone=True), nullable=True),
     )
 
 
 def downgrade() -> None:
-    op.drop_column('recording_segment', 'analytics_processed_at')
-    op.drop_column('recording_segment', 'analytics_plugins_processed')
-    op.drop_column('recording_segment', 'analytics_processed')
+    op.drop_column('recording_segments', 'analytics_processed_at')
+    op.drop_column('recording_segments', 'analytics_plugins_processed')
+    op.drop_column('recording_segments', 'analytics_processed')

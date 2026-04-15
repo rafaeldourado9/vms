@@ -18,9 +18,11 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # Tabela particionada por mês para performance com anos de dados
+    # Em tabelas particionadas no Postgres, a PK/uniques devem incluir as colunas
+    # de particionamento — por isso usamos PK composta (id, occurred_at).
     op.create_table(
         'audit_log',
-        sa.Column('id', postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text('gen_random_uuid()')),
+        sa.Column('id', postgresql.UUID(as_uuid=True), nullable=False, server_default=sa.text('gen_random_uuid()')),
         sa.Column('tenant_id', postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column('user_id', postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column('user_email', sa.String(255), nullable=True),
@@ -34,7 +36,8 @@ def upgrade() -> None:
         sa.Column('request_id', postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column('payload', postgresql.JSONB(), nullable=True, server_default='{}'),
         sa.Column('result', sa.String(20), nullable=True, server_default='success'),
-        sa.Column('occurred_at', sa.DateTime(timezone=True), nullable=True, server_default=sa.func.now()),
+        sa.Column('occurred_at', sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.PrimaryKeyConstraint('id', 'occurred_at', name='pk_audit_log'),
         postgresql_partition_by='RANGE (occurred_at)',
     )
 

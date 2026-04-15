@@ -7,7 +7,7 @@ from vms.cameras.domain import Camera, StreamProtocol
 from vms.cameras.ptz.client import PtzClient
 from vms.cameras.ptz.domain import PtzCommand, PtzPreset
 from vms.cameras.repository import CameraRepositoryPort
-from vms.core.exceptions import NotFoundError, ValidationError
+from vms.shared.exceptions import NotFoundError, ValidationError
 
 
 class PtzService:

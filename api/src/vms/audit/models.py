@@ -25,18 +25,18 @@ class AuditLogModel(Base):
         Index('ix_audit_log_resource', 'resource_type', 'resource_id'),
     )
 
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), nullable=False)
-    user_id = Column(UUID(as_uuid=True), nullable=True)
+    id = Column(UUID(as_uuid=False), primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_id = Column(UUID(as_uuid=False), nullable=False)
+    user_id = Column(UUID(as_uuid=False), nullable=True)
     user_email = Column(String(255), nullable=True)
     user_role = Column(String(50), nullable=True)
     action = Column(String(100), nullable=False)
     resource_type = Column(String(50), nullable=True)
-    resource_id = Column(UUID(as_uuid=True), nullable=True)
+    resource_id = Column(UUID(as_uuid=False), nullable=True)
     resource_name = Column(String(255), nullable=True)
     ip_address = Column(String(45), nullable=True)  # IPv6 max = 45 chars
     user_agent = Column(Text(), nullable=True)
-    request_id = Column(UUID(as_uuid=True), nullable=True)
+    request_id = Column(UUID(as_uuid=False), nullable=True)
     payload = Column(JSONB(), nullable=True, server_default=text("'{}'"))
     result = Column(String(20), nullable=True, server_default=text("'success'"))
     occurred_at = Column(DateTime(timezone=True), nullable=True, server_default=text("now()"))

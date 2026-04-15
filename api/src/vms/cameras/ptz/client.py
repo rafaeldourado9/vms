@@ -10,7 +10,7 @@ from xml.etree import ElementTree as ET
 import httpx
 
 from vms.cameras.ptz.domain import PtzCommand, PtzPreset
-from vms.core.exceptions import ValidationError
+from vms.shared.exceptions import ValidationError
 
 _PTZ_NS = "http://www.onvif.org/ver20/ptz/wsdl"
 _SCHEMA_NS = "http://www.onvif.org/ver10/schema"

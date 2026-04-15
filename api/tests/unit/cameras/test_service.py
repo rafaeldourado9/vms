@@ -7,7 +7,7 @@ import pytest
 
 from vms.cameras.domain import Agent, AgentStatus, Camera, CameraConfig, CameraManufacturer, StreamProtocol
 from vms.cameras.service import AgentService, CameraService
-from vms.core.exceptions import NotFoundError
+from vms.shared.exceptions import NotFoundError
 from vms.iam.domain import ApiKey, ApiKeyOwnerType
 
 

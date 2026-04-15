@@ -12,6 +12,12 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import StrEnum
 
+from vms.shared.events import DomainEvent
+from vms.shared.kernel import AggregateRoot, BillingId, EntityId, TenantId
+
+
+# ─── VMS License (Whitelabel activation) ──────────────────────────────────
+
 
 class DeploymentModel(StrEnum):
     MANAGED = "managed"       # White Label — cuidamos da infra
@@ -22,6 +28,13 @@ class LicenseStatus(StrEnum):
     ACTIVE = "active"
     EXPIRED = "expired"
     REVOKED = "revoked"
+
+
+class LicenseType(StrEnum):
+    """Tipo de licença por câmera."""
+    CAMERA_ONLY = "camera_only"
+    CAMERA_STORAGE = "camera_storage"
+    CAMERA_ANALYTICS = "camera_analytics"
 
 
 @dataclass
@@ -78,3 +91,74 @@ class VmsLicense:
         """Hash único da licença."""
         raw = f"{self.license_key}:{self.deployment_model}:{self.hardware_id}:{self.customer_email}"
         return hashlib.sha256(raw.encode()).hexdigest()[:16].upper()
+
+
+# ─── Camera License (per-camera licensing) ────────────────────────────────
+
+
+@dataclass(frozen=True)
+class LicenseCreated(DomainEvent):
+    """Evento de domínio: licença criada."""
+    license_id: BillingId | None = None
+    tenant_id: TenantId | None = None
+    camera_id: str | None = None
+    license_type: LicenseType | None = None
+
+
+@dataclass(frozen=True)
+class LicenseExpired(DomainEvent):
+    """Evento de domínio: licença expirou."""
+    license_id: BillingId | None = None
+    tenant_id: TenantId | None = None
+    camera_id: str | None = None
+
+
+@dataclass
+class LicenseValidation:
+    """Resultado da validação de uma licença."""
+    is_valid: bool = False
+    license: License | None = None
+    reason: str = ""
+
+
+@dataclass
+class License(AggregateRoot):
+    """
+    Licença por câmera.
+
+    Controla o acesso de cada câmera ao sistema.
+    Tipos: CAMERA_ONLY, CAMERA_STORAGE, CAMERA_ANALYTICS.
+    """
+    id: BillingId = field(default_factory=lambda: BillingId(uuid.uuid4()))
+    tenant_id: TenantId | None = None
+    camera_id: str | None = None
+    license_type: LicenseType = LicenseType.CAMERA_ONLY
+    status: LicenseStatus = LicenseStatus.ACTIVE
+    storage_limit_gb: int | None = None
+    analytics_enabled: bool = False
+    activated_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+    expires_at: datetime | None = None
+    created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
+
+    @property
+    def is_active(self) -> bool:
+        """Licença está ativa e não expirada."""
+        if self.status != LicenseStatus.ACTIVE:
+            return False
+        if self.expires_at and datetime.now(timezone.utc) > self.expires_at:
+            return False
+        return True
+
+    @property
+    def has_analytics(self) -> bool:
+        """Licença inclui analytics."""
+        return self.license_type == LicenseType.CAMERA_ANALYTICS and self.analytics_enabled
+
+    def expire(self) -> None:
+        """Expira a licença."""
+        self.status = LicenseStatus.EXPIRED
+        self.record_event(LicenseExpired(
+            license_id=self.id,
+            tenant_id=self.tenant_id,
+            camera_id=self.camera_id,
+        ))

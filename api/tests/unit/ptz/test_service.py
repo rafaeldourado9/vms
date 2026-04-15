@@ -8,7 +8,7 @@ import pytest
 from vms.cameras.domain import Camera, CameraManufacturer, StreamProtocol
 from vms.cameras.ptz.domain import PtzCommand, PtzPreset
 from vms.cameras.ptz.service import PtzService
-from vms.core.exceptions import NotFoundError, ValidationError
+from vms.shared.exceptions import NotFoundError, BusinessRuleViolation
 
 
 def _onvif_camera(ptz_supported: bool = True) -> Camera:
@@ -87,9 +87,9 @@ class TestPtzServiceListPresets:
             await svc.list_presets("cam-999", "tenant-1")
 
     async def test_list_presets_raises_for_non_onvif(self, svc, camera_repo):
-        """list_presets lança ValidationError para câmera não-ONVIF."""
+        """list_presets lança BusinessRuleViolation para câmera não-ONVIF."""
         camera_repo.get_by_id.return_value = _rtsp_camera()
-        with pytest.raises(ValidationError):
+        with pytest.raises(BusinessRuleViolation):
             await svc.list_presets("cam-2", "tenant-1")
 
 
@@ -114,9 +114,9 @@ class TestPtzServiceGotoPreset:
         assert call_kwargs.args[3] == 0.8
 
     async def test_goto_preset_raises_for_non_onvif(self, svc, camera_repo):
-        """goto_preset lança ValidationError para câmera não-ONVIF."""
+        """goto_preset lança BusinessRuleViolation para câmera não-ONVIF."""
         camera_repo.get_by_id.return_value = _rtsp_camera()
-        with pytest.raises(ValidationError):
+        with pytest.raises(BusinessRuleViolation):
             await svc.goto_preset("cam-2", "tenant-1", "preset-1")
 
 
@@ -142,9 +142,9 @@ class TestPtzServiceMove:
         assert passed_command.tilt == -0.3
 
     async def test_move_raises_for_non_onvif(self, svc, camera_repo):
-        """move lança ValidationError para câmera não-ONVIF."""
+        """move lança BusinessRuleViolation para câmera não-ONVIF."""
         camera_repo.get_by_id.return_value = _rtsp_camera()
-        with pytest.raises(ValidationError):
+        with pytest.raises(BusinessRuleViolation):
             await svc.move("cam-2", "tenant-1", PtzCommand())
 
 
@@ -190,13 +190,13 @@ class TestPtzServiceSavePreset:
         assert result.name == "Portaria"
 
     async def test_save_preset_raises_for_non_onvif(self, svc, camera_repo):
-        """save_preset lança ValidationError para câmera não-ONVIF."""
+        """save_preset lança BusinessRuleViolation para câmera não-ONVIF."""
         camera_repo.get_by_id.return_value = _rtsp_camera()
-        with pytest.raises(ValidationError):
+        with pytest.raises(BusinessRuleViolation):
             await svc.save_preset("cam-2", "tenant-1", "Preset")
 
     async def test_save_preset_propagates_client_error(self, svc, camera_repo):
-        """save_preset propaga ValidationError lançado pelo PtzClient."""
+        """save_preset propaga BusinessRuleViolation lançado pelo PtzClient."""
         camera_repo.get_by_id.return_value = _onvif_camera()
 
         with (
@@ -204,8 +204,8 @@ class TestPtzServiceSavePreset:
             patch("vms.cameras.ptz.service.PtzClient.get_profile_token", new=AsyncMock(return_value="prof-1")),
             patch(
                 "vms.cameras.ptz.service.PtzClient.set_preset",
-                new=AsyncMock(side_effect=ValidationError("SetPreset falhou: HTTP 500")),
+                new=AsyncMock(side_effect=BusinessRuleViolation("SetPreset falhou: HTTP 500")),
             ),
         ):
-            with pytest.raises(ValidationError, match="SetPreset falhou"):
+            with pytest.raises(BusinessRuleViolation, match="SetPreset falhou"):
                 await svc.save_preset("cam-1", "tenant-1", "Preset")

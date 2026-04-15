@@ -126,3 +126,14 @@ class StateTransitionError(DomainError):
             )
     """
     pass
+
+
+class ValidationError(DomainError):
+    """
+    Validação de dados falhou (entrada inválida ou malformada).
+
+    Uso:
+        if not camera.onvif_url:
+            raise ValidationError("URL ONVIF é obrigatória")
+    """
+    pass
