@@ -9,8 +9,9 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from vms.cameras.repository import CameraRepository
-from vms.core.deps import ApiKeyHeader, DbSession
-from vms.core.exceptions import AuthenticationError, NotFoundError
+from vms.shared.api.dependencies import ApiKeyHeader, DbSession
+from vms.infrastructure.exceptions import AuthenticationError
+from vms.shared.exceptions import NotFoundError
 from vms.iam.repository import ApiKeyRepository
 from vms.iam.service import AuthService
 from vms.plugins.schemas import (
@@ -87,8 +88,8 @@ async def list_plugin_cameras(api_key: ApiKeyHeader, db: DbSession) -> list[Plug
         PluginCameraResponse(
             id=c.id,
             name=c.name,
-            manufacturer=c.manufacturer.value,
-            stream_protocol=c.stream_protocol.value,
+            manufacturer=c.manufacturer,
+            stream_protocol=c.stream_protocol,
             is_online=c.is_online,
             mediamtx_path=c.mediamtx_path,
             location=c.location,

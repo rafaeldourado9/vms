@@ -106,7 +106,7 @@ http {
             chunked_transfer_encoding off;
             proxy_read_timeout 86400s;
         }
-        location = /health {
+        location = /api/v1/health {
             proxy_pass http://vms_api;
             access_log off;
         }
@@ -174,6 +174,22 @@ http {
             proxy_set_header Connection "";
             proxy_read_timeout 10s;
         }
+
+        # Intelbras LPR — path hardcoded no firmware (não configurável)
+        # camera_id passado via header X-Camera-Id para identificação
+        location = /NotificationInfo/TollgateInfo {
+            limit_req zone=public_webhook burst=20 nodelay;
+            client_max_body_size 20m;
+            proxy_pass http://vms_api/webhooks/intelbras_events$is_args$args;
+            proxy_set_header Host $host;
+            proxy_set_header X-Real-IP $remote_addr;
+            proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+            proxy_set_header X-Forwarded-Proto $scheme;
+            proxy_set_header X-Camera-Serial $http_x_camera_serial;
+            proxy_http_version 1.1;
+            proxy_set_header Connection "";
+            proxy_read_timeout 10s;
+        }
     }
 }
 EOF
@@ -187,7 +203,7 @@ RETRY_COUNT=0
 
 while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
     if getent hosts api > /dev/null 2>&1; then
-        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://api:8000/health 2>/dev/null || echo "000")
+        HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://api:8000/api/v1/health 2>/dev/null || echo "000")
         if [ "$HTTP_STATUS" = "200" ]; then
             echo "[nginx] API está saudável (HTTP $HTTP_STATUS) — iniciando Nginx"
             break

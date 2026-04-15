@@ -29,6 +29,22 @@ class ReportResponse(BaseModel):
 
     model_config = {"from_attributes": True}
 
+    @classmethod
+    def model_validate(cls, obj, **kwargs):
+        # Converte EntityId e UUID para str antes de validar
+        if hasattr(obj, '__dataclass_fields__') or hasattr(obj, '__dict__'):
+            data = {}
+            for field in ('id', 'tenant_id', 'report_type', 'parameters', 'status',
+                          'file_path', 'sha256_hash', 'generated_at', 'created_at'):
+                val = getattr(obj, field, None)
+                if hasattr(val, 'value'):  # EntityId
+                    val = str(val.value)
+                elif hasattr(val, 'hex'):  # UUID
+                    val = str(val)
+                data[field] = val
+            return cls(**{k: v for k, v in data.items() if v is not None or k in ('file_path', 'sha256_hash', 'generated_at')})
+        return super().model_validate(obj, **kwargs)
+
 
 class ReportListResponse(BaseModel):
     """Lista paginada de relatórios."""

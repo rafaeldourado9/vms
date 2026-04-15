@@ -29,7 +29,7 @@ async def _provision_mediamtx_paths() -> None:
     from vms.cameras.domain import StreamProtocol
     from vms.cameras.mediamtx import MediaMTXClient
     from vms.cameras.models import CameraModel
-    from vms.core.database import get_session_factory
+    from vms.infrastructure.database import get_session_factory
 
     # Health check: espera MediaMTX estar pronto (max 30s)
     mt_client = MediaMTXClient()
@@ -224,8 +224,8 @@ def _include_routers(app: FastAPI) -> None:
     from vms.billing.router import router as billing_router, license_router
     from vms.lgpd.router import router as lgpd_router
 
-    # Health — sem prefixo /api/v1
-    app.include_router(health_router)
+    # Health
+    app.include_router(health_router, prefix="/api/v1")
 
     # Autenticação e gestão de usuários
     app.include_router(iam_router, prefix="/api/v1")
@@ -264,6 +264,9 @@ def _include_routers(app: FastAPI) -> None:
     # Billing — faturamento e licenças
     app.include_router(billing_router, prefix="/api/v1")
     app.include_router(license_router, prefix="/api/v1")
+
+    # Reports — relatórios assíncronos
+    app.include_router(reports_router, prefix="/api/v1")
 
     # LGPD — compliance e proteção de dados
     app.include_router(lgpd_router, prefix="/api/v1")

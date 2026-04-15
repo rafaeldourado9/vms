@@ -261,7 +261,7 @@ async def publish_event(
     para que o SSE receba o evento no frontend.
 
     Uso legado:
-        from vms.core.event_bus import publish_event
+        from vms.infrastructure.messaging import publish_event
         await publish_event("alpr.detected", {...}, tenant_id="tid")
 
     Nova forma recomendada:
@@ -272,12 +272,18 @@ async def publish_event(
         return
 
     # Cria DomainEvent genérico para compatibilidade
+    from dataclasses import dataclass, field
     from vms.shared.events import DomainEvent
 
+    _routing_key = routing_key
+    _payload = payload
+    _tenant_id = tenant_id
+
+    @dataclass(frozen=True, kw_only=True)
     class GenericDomainEvent(DomainEvent):
-        event_type: str = routing_key
-        payload: dict = payload
-        tenant_id: str | None = tenant_id
+        event_type: str = field(default=_routing_key)
+        payload: dict = field(default_factory=lambda: _payload)
+        tenant_id: str | None = field(default=_tenant_id)
 
     event = GenericDomainEvent()
     await event_bus.publish(event)

@@ -133,6 +133,8 @@ class AnalyticsService:
         camera_id: str | None = None,
         plugin_id: str | None = None,
         severity: str | None = None,
+        occurred_after: datetime | None = None,
+        occurred_before: datetime | None = None,
         limit: int = 50,
         offset: int = 0,
     ) -> list[AnalyticsEvent]:
@@ -151,6 +153,12 @@ class AnalyticsService:
             query = query.where(AnalyticsEvent.plugin_id == plugin_id)
         if severity:
             query = query.where(AnalyticsEvent.severity == severity)
+        if occurred_after:
+            after = occurred_after.replace(tzinfo=None) if occurred_after.tzinfo else occurred_after
+            query = query.where(AnalyticsEvent.occurred_at >= after)
+        if occurred_before:
+            before = occurred_before.replace(tzinfo=None) if occurred_before.tzinfo else occurred_before
+            query = query.where(AnalyticsEvent.occurred_at <= before)
 
         result = await self.db.execute(query)
         return list(result.scalars().all())

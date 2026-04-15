@@ -27,7 +27,7 @@ from fastapi import APIRouter, Query, Request, status
 from sqlalchemy import select
 
 from vms.cameras.models import CameraModel
-from vms.core.database import get_session_factory
+from vms.infrastructure.database import get_session_factory
 from vms.events.models import VmsEventModel
 from vms.events.normalizers.base import registry
 from vms.shared.api.rate_limit import limiter
@@ -206,9 +206,10 @@ async def _resolve_camera(
 
     1. ?camera_id= query param  — integrador configurou na URL
     2. Campo camera_id/deviceId no body
-    3. Stream key live/<key>
-    4. Campo ipAddress no XML (câmera envia o próprio IP)
-    5. IP de origem → match com rtsp_url / onvif_url no DB
+    3. Serial extraído do JPEG Intelbras ITSCAM
+    4. Stream key live/<key>
+    5. Campo ipAddress no XML (câmera Hikvision inclui <ipAddress>)
+    6. IP de origem → match com rtsp_url / onvif_url no DB
     """
     # 1. Query param — mais confiável
     if camera_id_param:
@@ -218,7 +219,6 @@ async def _resolve_camera(
             return result
 
     # 2. Campo direto no body
-    # DeviceID = Intelbras "Nº dispos." (campo enviado no body do push)
     for key in ("camera_id", "cameraId", "DeviceID", "deviceId", "device_id", "deviceSerial", "serialNo"):
         cam_id = body.get(key)
         if cam_id and isinstance(cam_id, str):
@@ -227,7 +227,16 @@ async def _resolve_camera(
                 logger.debug("Câmera resolvida via body[%s]: %s", key, cam_id)
                 return result
 
-    # 3. Stream key
+    # 3. Serial embutido no JPEG Intelbras ITSCAM
+    serial = _extract_intelbras_serial(body)
+    if serial:
+        result = await _lookup_by_serial(serial)
+        if result:
+            logger.debug("Câmera resolvida via serial Intelbras: %s", serial)
+            return result
+        logger.debug("Serial Intelbras extraído mas não encontrado no DB: %s", serial)
+
+    # 4. Stream key
     path = body.get("path", body.get("stream_key", ""))
     if m := _STREAM_KEY_RE.match(str(path)):
         result = await _lookup_by_stream_key(m.group("key"))
@@ -235,7 +244,7 @@ async def _resolve_camera(
             logger.debug("Câmera resolvida via stream_key: %s", m.group("key"))
             return result
 
-    # 4. IP no payload XML (câmera Hikvision inclui <ipAddress>)
+    # 5. IP no payload XML
     payload_ip = body.get("ipAddress", "")
     if payload_ip and payload_ip != remote_ip:
         result = await _lookup_by_ip(str(payload_ip))
@@ -243,7 +252,7 @@ async def _resolve_camera(
             logger.debug("Câmera resolvida via ipAddress no payload: %s", payload_ip)
             return result
 
-    # 5. IP de origem
+    # 6. IP de origem
     if remote_ip:
         result = await _lookup_by_ip(remote_ip)
         if result:
@@ -275,6 +284,57 @@ async def _lookup_by_stream_key(stream_key: str) -> tuple[str, str] | None:
             )
         )
         return (cam.tenant_id, cam.id) if cam else None
+
+
+async def _lookup_by_serial(serial: str) -> tuple[str, str] | None:
+    """Busca câmera pelo serial number (Intelbras ITSCAM embeds serial in JPEG)."""
+    if not serial:
+        return None
+    factory = get_session_factory()
+    async with factory() as session:
+        cam = await session.scalar(
+            select(CameraModel).where(
+                CameraModel.serial_number == serial,
+                CameraModel.is_active.is_(True),
+            )
+        )
+        return (cam.tenant_id, cam.id) if cam else None
+
+
+def _extract_intelbras_serial(body: dict) -> str | None:
+    """
+    Extrai serial number do JPEG Intelbras ITSCAM.
+
+    O JPEG enviado pela câmera contém metadados proprietários embutidos
+    nos primeiros bytes do binário. O serial pode estar cercado por bytes
+    não-imprimíveis (null-separated), então buscamos no raw bytes diretamente.
+    Serial ex: OHM1400095CU, VHD3230, ITSCAM, etc.
+    """
+    try:
+        import base64
+        content = (
+            body.get("Picture", {}).get("NormalPic", {}).get("Content")
+            or body.get("Picture", {}).get("Content")
+        )
+        if not content:
+            return None
+        raw = base64.b64decode(content)
+        # Busca nos primeiros 8KB onde estão os metadados Intelbras
+        # Busca direta no raw bytes — serial pode estar entre bytes não-imprimíveis
+        matches = re.findall(rb'[A-Z]{2,5}[0-9]{4,}[A-Z0-9]{0,6}', raw[:8192])
+        if matches:
+            logger.debug(
+                "Candidatos a serial Intelbras: %s",
+                [m.decode("ascii", errors="ignore") for m in matches[:10]],
+            )
+        for m in matches:
+            text = m.decode("ascii", errors="ignore")
+            if 8 <= len(text) <= 20:
+                logger.debug("Serial Intelbras extraído: %s", text)
+                return text
+    except Exception as exc:
+        logger.debug("Falha ao extrair serial Intelbras: %s", exc)
+    return None
 
 
 async def _lookup_by_ip(ip: str) -> tuple[str, str] | None:
@@ -395,7 +455,7 @@ async def hikvision_webhook(
             # Usa EventService.ingest_alpr() para dedup Redis + publish
             from vms.events.service import EventService
             from vms.events.repository import EventRepository
-            from vms.core.database import get_session_factory
+            from vms.infrastructure.database import get_session_factory
 
             factory = get_session_factory()
             async with factory() as session:
@@ -455,9 +515,10 @@ async def intelbras_webhook(
     remote_ip = _get_real_ip(request)
 
     logger.info(
-        "Intelbras webhook | ip=%s camera_id_param=%s body_keys=%s",
+        "Intelbras webhook | ip=%s camera_id_param=%s ct=%s body_keys=%s",
         remote_ip,
         camera_id,
+        request.headers.get("content-type", "?"),
         list(body.keys()) if body else "empty",
     )
 
@@ -477,10 +538,15 @@ async def intelbras_webhook(
         try:
             detection = normalizer.normalize(body, cam_id, tenant_id)
 
+            # normalize() retorna None quando não há placa detectada (ex: Desconhecido)
+            if detection is None:
+                logger.debug("Intelbras ITSCAM: frame sem placa detectada — ignorando")
+                return {"ok": True, "event_id": None, "no_plate": True}
+
             # Usa EventService.ingest_alpr() para dedup Redis + publish
             from vms.events.service import EventService
             from vms.events.repository import EventRepository
-            from vms.core.database import get_session_factory
+            from vms.infrastructure.database import get_session_factory
 
             factory = get_session_factory()
             async with factory() as session:
@@ -517,7 +583,11 @@ async def intelbras_webhook(
         except Exception as exc:
             logger.error("Erro ao normalizar Smart Event Intelbras: %s", exc)
 
-    # Fallback genérico
+    # Fallback genérico — não salvar se o payload for só JPEG sem campos úteis
+    if body.get("Picture") and not body.get("plate") and not body.get("placa") and not body.get("Events"):
+        logger.debug("Intelbras: payload Picture sem metadados úteis — ignorando fallback")
+        return {"ok": True, "event_id": None, "no_plate": True}
+
     event_type = f"intelbras_{body.get('eventType', body.get('type', body.get('event', 'event')))}"
     plate = body.get("plate") or body.get("licensePlate") or body.get("placa")
     confidence = body.get("confidence") or body.get("confianca")
@@ -570,7 +640,7 @@ async def generic_camera_webhook(
                 # Usa EventService.ingest_alpr() para dedup Redis + publish
                 from vms.events.service import EventService
                 from vms.events.repository import EventRepository
-                from vms.core.database import get_session_factory
+                from vms.infrastructure.database import get_session_factory
 
                 factory = get_session_factory()
                 async with factory() as session:
@@ -617,7 +687,7 @@ async def webhooks_health() -> dict:
 
     Uso: GET /webhooks/health
     """
-    from vms.core.database import get_session_factory
+    from vms.infrastructure.database import get_session_factory
     from sqlalchemy import text
 
     # Verifica normalizers registrados

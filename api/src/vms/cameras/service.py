@@ -20,8 +20,8 @@ from vms.cameras.domain import (
 )
 from vms.cameras.mediamtx import MediaMTXClient
 from vms.cameras.repository import AgentRepositoryPort, CameraRepositoryPort
-from vms.core.config import get_settings
-from vms.core.exceptions import NotFoundError, ValidationError
+from vms.infrastructure.config import get_settings
+from vms.shared.exceptions import NotFoundError, DuplicateError, BusinessRuleViolation
 from vms.iam.domain import ApiKeyOwnerType
 from vms.iam.service import ApiKeyService
 
@@ -60,12 +60,12 @@ class CameraService:
         # Verifica unicidade apenas entre câmeras ativas
         existing_by_name = await self._cameras.get_by_name(name, tenant_id, only_active=True)
         if existing_by_name:
-            raise ValidationError(f"Já existe uma câmera com o nome '{name}' neste tenant")
+            raise DuplicateError(f"Já existe uma câmera com o nome '{name}' neste tenant")
 
         if rtsp_url:
             existing_by_url = await self._cameras.get_by_rtsp_url(rtsp_url, tenant_id, only_active=True)
             if existing_by_url:
-                raise ValidationError(f"Já existe uma câmera com a URL RTSP '{rtsp_url[:50]}...' neste tenant")
+                raise DuplicateError(f"Já existe uma câmera com a URL RTSP '{rtsp_url[:50]}...' neste tenant")
 
         rtmp_stream_key: str | None = None
         ptz_supported: bool = False
@@ -76,7 +76,7 @@ class CameraService:
 
         elif stream_protocol == StreamProtocol.ONVIF:
             if not onvif_url:
-                raise ValidationError("onvif_url é obrigatório para protocolo ONVIF")
+                raise DuplicateError("onvif_url é obrigatório para protocolo ONVIF")
             # Se rtsp_url não foi fornecida, tenta extrair via probe
             if not rtsp_url:
                 from vms.cameras.onvif_client import OnvifClient
@@ -94,7 +94,7 @@ class CameraService:
             id=str(uuid.uuid4()),
             tenant_id=tenant_id,
             name=name,
-            manufacturer=CameraManufacturer(manufacturer if manufacturer in CameraManufacturer._value2member_map_ else "generic"),
+            manufacturer=manufacturer if manufacturer in (CameraManufacturer.HIKVISION, CameraManufacturer.INTELBRAS, CameraManufacturer.GENERIC) else CameraManufacturer.GENERIC,
             stream_protocol=stream_protocol,
             rtsp_url=rtsp_url,
             rtmp_stream_key=rtmp_stream_key,
@@ -168,13 +168,13 @@ class CameraService:
         if name is not None and name != camera.name:
             existing_by_name = await self._cameras.get_by_name(name, tenant_id, only_active=False)
             if existing_by_name:
-                raise ValidationError(f"Já existe uma câmera com o nome '{name}' neste tenant")
+                raise DuplicateError(f"Já existe uma câmera com o nome '{name}' neste tenant")
             camera.name = name
         
         if rtsp_url is not None and rtsp_url != camera.rtsp_url:
             existing_by_url = await self._cameras.get_by_rtsp_url(rtsp_url, tenant_id, only_active=False)
             if existing_by_url:
-                raise ValidationError(f"Já existe uma câmera com a URL RTSP '{rtsp_url[:50]}...' neste tenant")
+                raise DuplicateError(f"Já existe uma câmera com a URL RTSP '{rtsp_url[:50]}...' neste tenant")
             camera.rtsp_url = rtsp_url
         
         if onvif_url is not None:
@@ -184,7 +184,7 @@ class CameraService:
         if onvif_password is not None:
             camera.onvif_password = onvif_password
         if manufacturer is not None:
-            camera.manufacturer = CameraManufacturer(manufacturer if manufacturer in CameraManufacturer._value2member_map_ else "generic")
+            camera.manufacturer = manufacturer if manufacturer in (CameraManufacturer.HIKVISION, CameraManufacturer.INTELBRAS, CameraManufacturer.GENERIC) else CameraManufacturer.GENERIC
         if location is not None:
             camera.location = location
         if address is not None:
@@ -361,7 +361,7 @@ class AgentService:
 async def _notify_agent(agent_id: str, event: str, data: dict) -> None:
     """Publica evento no Redis channel do agent (best-effort, não falha)."""
     try:
-        from vms.core.config import get_settings
+        from vms.infrastructure.config import get_settings
         import redis.asyncio as aioredis
 
         settings = get_settings()

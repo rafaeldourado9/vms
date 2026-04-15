@@ -32,7 +32,7 @@ from vms.cameras.schemas import (
 )
 from vms.cameras.ptz.router import router as ptz_router
 from vms.cameras.service import AgentService, CameraService
-from vms.core.deps import ApiKeyHeader, CurrentUser, DbSession
+from vms.shared.api.dependencies import ApiKeyHeader, CurrentUser, DbSession
 from vms.iam.repository import ApiKeyRepository
 from vms.iam.service import ApiKeyService
 
@@ -194,7 +194,7 @@ async def get_stream_urls(
     """Retorna URLs HLS/WebRTC assinadas para um viewer."""
     from vms.iam.service import AuthService
     from vms.iam.repository import ApiKeyRepository as IamRepo
-    from vms.core.exceptions import NotFoundError
+    from vms.shared.exceptions import NotFoundError
 
     try:
         # Gera viewer token via AuthService
@@ -240,7 +240,7 @@ async def get_rtmp_config(
     request: Request,
 ) -> RtmpConfigResponse:
     """Retorna URL RTMP e stream key para câmeras com stream_protocol=rtmp_push."""
-    from vms.core.exceptions import NotFoundError
+    from vms.shared.exceptions import NotFoundError
 
     svc = _camera_svc(db)
     camera = await svc.get_camera(camera_id, claims.tenant_id)
@@ -251,7 +251,7 @@ async def get_rtmp_config(
             detail="Câmera não está configurada como RTMP push",
         )
 
-    from vms.core.config import get_settings
+    from vms.infrastructure.config import get_settings
     settings = get_settings()
     # URL pública no formato padrão do mercado: {base}/live/{stream_key}.stream
     rtmp_url = f"{settings.rtmp_public_url}/live/{camera.rtmp_stream_key}.stream"
@@ -295,7 +295,7 @@ async def get_thumbnail(
     """
     from fastapi.responses import Response as FastResponse
     from vms.cameras.thumbnail import capture_thumbnail
-    from vms.core.security import decode_token
+    from vms.infrastructure.security import decode_token
     from jose import JWTError
 
     if not token:
@@ -396,7 +396,7 @@ async def create_agent(
     return CreateAgentResponse(
         id=agent.id,
         name=agent.name,
-        status=agent.status.value,
+        status=agent.status,
         last_heartbeat_at=agent.last_heartbeat_at,
         version=agent.version,
         streams_running=agent.streams_running,
@@ -518,8 +518,8 @@ async def agent_ws(
     Agent autentica com ?api_key=<key> na query string.
     Recebe mensagens: config_updated, camera_added, camera_removed, restart_stream.
     """
-    from vms.core.database import get_session_factory
-    from vms.core.config import get_settings
+    from vms.infrastructure.database import get_session_factory
+    from vms.infrastructure.config import get_settings
     import redis.asyncio as aioredis
 
     await websocket.accept()

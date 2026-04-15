@@ -8,8 +8,8 @@ from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from redis.asyncio import Redis
 
-from vms.core.deps import CurrentUser, DbSession
-from vms.core.rate_limit import limiter
+from vms.shared.api.dependencies import CurrentUser, DbSession
+from vms.shared.api.rate_limit import limiter
 from vms.events.domain import AlprDetection
 from vms.events.normalizers.base import registry
 # Importa normalizers para forçar auto-registro
@@ -140,13 +140,18 @@ async def mediamtx_on_ready(
         .values(is_online=True, last_seen_at=datetime.utcnow())
     )
     await db.execute(stmt)
+    await db.commit()
 
-    from vms.core.event_bus import publish_event
-    await publish_event(
-        "camera.online",
-        {"camera_id": camera_id, "path": body.path},
-        tenant_id=tenant_id,
-    )
+    try:
+        from vms.infrastructure.messaging import publish_event
+        await publish_event(
+            "camera.online",
+            {"camera_id": camera_id, "path": body.path},
+            tenant_id=tenant_id,
+        )
+    except Exception as exc:
+        logger.warning("Falha ao publicar camera.online (não crítico): %s", exc)
+
     return {"ok": True}
 
 
@@ -173,13 +178,18 @@ async def mediamtx_on_not_ready(body: MediaMTXOnNotReadyPayload, db: DbSession) 
         .values(is_online=False)
     )
     await db.execute(stmt)
+    await db.commit()
 
-    from vms.core.event_bus import publish_event
-    await publish_event(
-        "camera.offline",
-        {"camera_id": camera_id, "path": body.path},
-        tenant_id=tenant_id,
-    )
+    try:
+        from vms.infrastructure.messaging import publish_event
+        await publish_event(
+            "camera.offline",
+            {"camera_id": camera_id, "path": body.path},
+            tenant_id=tenant_id,
+        )
+    except Exception as exc:
+        logger.warning("Falha ao publicar camera.offline (não crítico): %s", exc)
+
     return {"ok": True}
 
 
@@ -309,7 +319,7 @@ async def _resolve_live_path(path: str, db) -> tuple[str, str] | None:
 async def _resolve_tenant(camera_id: str) -> str:
     """Resolve tenant_id a partir do camera_id via repositório."""
     from vms.cameras.repository import CameraRepository
-    from vms.core.database import get_session_factory
+    from vms.infrastructure.database import get_session_factory
 
     factory = get_session_factory()
     async with factory() as session:
