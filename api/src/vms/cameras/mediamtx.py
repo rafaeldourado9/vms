@@ -41,101 +41,97 @@ class MediaMTXClient:
 
     async def add_path(self, path: str, source_url: str = "") -> bool:
         """
-        Adiciona path de stream no MediaMTX. Retorna True se OK.
+        Upsert de path de stream no MediaMTX. Retorna True se OK.
 
-        - source_url vazio: MediaMTX aceita qualquer publisher (RTMP push / câmeras ativas)
-        - source_url preenchido: MediaMTX faz pull do RTSP (modo agent)
-        
-        Se o path já existe, faz update em vez de create.
+        - source_url vazio: aceita qualquer publisher (RTMP push)
+        - source_url preenchido: pull RTSP (modo agent)
+
+        Estratégia:
+        1. Verifica runtime: se path já está ativo, retorna True sem ruído.
+        2. Tenta edit (config existente): atualiza se já provisionado antes.
+        3. Tenta add (config nova): cria fresh.
         """
-        url = f"{self._base_url}/v3/config/paths/add/{path}"
-        body: dict = {"name": path, "record": True}
+        body: dict = {
+            "record": True,
+            "recordPath": "/recordings/%path/%Y/%m/%d/%H-%M-%S-%f",
+        }
         if source_url:
             body["source"] = source_url
-        
+
+        try:
+            async with httpx.AsyncClient(timeout=5.0) as client:
+                # 1. Path já está ativo como stream runtime? Nada a fazer.
+                runtime_resp = await client.get(
+                    f"{self._base_url}/v3/paths/get/{path}"
+                )
+                if runtime_resp.status_code == 200:
+                    logger.debug("Path MediaMTX já ativo (runtime): %s", path)
+                    return True
+
+                # 2. Tenta atualizar config existente
+                edit_resp = await client.post(
+                    f"{self._base_url}/v3/config/paths/edit/{path}", json=body
+                )
+                if edit_resp.status_code == 200:
+                    logger.debug("Path MediaMTX config atualizado: %s", path)
+                    return True
+
+                # 3. Config não existe — cria
+                if edit_resp.status_code == 404:
+                    add_resp = await client.post(
+                        f"{self._base_url}/v3/config/paths/add/{path}", json=body
+                    )
+                    if add_resp.status_code in (200, 400):
+                        logger.debug("Path MediaMTX criado: %s", path)
+                        return True
+                    logger.warning(
+                        "Erro ao criar path '%s': %s — %s",
+                        path, add_resp.status_code, add_resp.text,
+                    )
+                    return False
+
+                logger.warning(
+                    "Erro ao atualizar path '%s': %s — %s",
+                    path, edit_resp.status_code, edit_resp.text,
+                )
+                return False
+        except Exception as exc:
+            logger.warning("Falha ao provisionar path '%s' no MediaMTX: %s", path, exc)
+            return False
+    
+    async def add_playback_path(self, path_name: str, file_path: str) -> bool:
+        """
+        Cria path temporário no MediaMTX apontando para um arquivo MP4 local.
+
+        MediaMTX lê o arquivo e serve como stream HLS (remux sem reencoding).
+        O path se auto-remove após ficar ocioso por 1h (sourceOnDemandCloseAfter).
+        """
+        url = f"{self._base_url}/v3/config/paths/add/{path_name}"
+        body: dict = {
+            "source": f"file://{file_path}",
+            "record": False,
+            "sourceOnDemand": True,
+            "sourceOnDemandCloseAfter": "3600s",
+        }
         try:
             async with httpx.AsyncClient(timeout=5.0) as client:
                 response = await client.post(url, json=body)
-                
-                # 200 OK = path criado
                 if response.status_code == 200:
-                    logger.debug("Path MediaMTX adicionado: %s", path)
+                    logger.debug("Playback path criado: %s → %s", path_name, file_path)
                     return True
-                
-                # 400 = path já existe, tenta update
                 if response.status_code == 400:
-                    logger.debug("Path já existe, tentando update: %s", path)
-                    return await self._update_path(path, source_url)
-                
+                    # Já existe — idempotente
+                    logger.debug("Playback path já existe: %s", path_name)
+                    return True
                 logger.warning(
-                    "Erro HTTP ao adicionar path '%s' no MediaMTX: %s - %s",
-                    path,
+                    "Erro ao criar playback path '%s': %s — %s",
+                    path_name,
                     response.status_code,
                     response.text,
                 )
                 return False
         except Exception as exc:
-            logger.warning("Falha ao adicionar path '%s' no MediaMTX: %s", path, exc)
-            return False
-
-    async def _update_path(self, path: str, source_url: str = "") -> bool:
-        """Atualiza path existente no MediaMTX. Se não existe, cria."""
-        url = f"{self._base_url}/v3/config/paths/edit/{path}"
-        body: dict = {"name": path}
-        if source_url:
-            body["source"] = source_url
-        
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.post(url, json=body)
-                
-                if response.status_code == 200:
-                    logger.debug("Path MediaMTX atualizado: %s", path)
-                    return True
-                
-                # 404 = path não existe, tenta criar
-                if response.status_code == 404:
-                    logger.debug("Path não existe, tentando criar: %s", path)
-                    return await self._create_path(path, source_url)
-                
-                logger.warning(
-                    "Erro HTTP ao atualizar path '%s' no MediaMTX: %s",
-                    path,
-                    response.status_code,
-                )
-                return False
-        except Exception as exc:
-            logger.warning("Falha ao atualizar path '%s' no MediaMTX: %s", path, exc)
-            return False
-    
-    async def _create_path(self, path: str, source_url: str = "") -> bool:
-        """Cria path no MediaMTX."""
-        url = f"{self._base_url}/v3/config/paths/add/{path}"
-        body: dict = {"name": path, "record": True}
-        if source_url:
-            body["source"] = source_url
-        
-        try:
-            async with httpx.AsyncClient(timeout=5.0) as client:
-                response = await client.post(url, json=body)
-                
-                if response.status_code == 200:
-                    logger.info("Path MediaMTX criado: %s", path)
-                    return True
-                
-                # 400 = path já existe (condição de race), considera sucesso
-                if response.status_code == 400:
-                    logger.debug("Path já existe (race condition): %s", path)
-                    return True
-                
-                logger.warning(
-                    "Erro HTTP ao criar path '%s' no MediaMTX: %s",
-                    path,
-                    response.status_code,
-                )
-                return False
-        except Exception as exc:
-            logger.warning("Falha ao criar path '%s' no MediaMTX: %s", path, exc)
+            logger.warning("Falha ao criar playback path '%s': %s", path_name, exc)
             return False
 
     async def remove_path(self, path: str) -> bool:

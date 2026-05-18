@@ -127,6 +127,9 @@ class StreamingService:
 
         Valida JWT de tipo 'viewer' e confere se o camera_id do token
         corresponde ao path do MediaMTX (suporta tenant-path e live-path).
+
+        Paths de playback (pb-*): aceita qualquer access token válido.
+        O path name é secreto — só retornado a usuários autenticados.
         """
         if not token:
             return False
@@ -134,6 +137,11 @@ class StreamingService:
             from vms.infrastructure.security import decode_token
 
             payload = decode_token(token)
+
+            # Paths de playback temporário — qualquer JWT de usuário autenticado
+            if path.startswith("pb-"):
+                return payload.get("type") in ("access", "viewer")
+
             if payload.get("type") != "viewer":
                 return False
 

@@ -51,7 +51,13 @@ async def task_dispatch_notification(
                 created_at=model.created_at,
             )
 
-            log = await dispatch_webhook(rule, event_type, event_id, payload)
+            log = await dispatch_webhook(
+                rule,
+                event_type,
+                event_id,
+                payload,
+                client=ctx.get("http_client"),
+            )
             log_repo = NotificationLogRepository(session)
             await log_repo.create(log)
             await session.commit()

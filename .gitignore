@@ -33,3 +33,9 @@ htmlcov/
 *.env.local
 legado/
 legado
+.claude/
+CLAUDE.md
+.reversa/
+_reversa_sdd/
+.claude/
+

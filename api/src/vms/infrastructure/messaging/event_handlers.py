@@ -22,12 +22,6 @@ from vms.cameras.domain import (
 from vms.infrastructure.messaging.event_bus import DomainEventBus, EventRegistry
 from vms.recordings.domain import ClipFailed, ClipReady, ClipRequested, SegmentIndexed
 from vms.shared.events import DomainEvent
-from vms.vod.domain import (
-    VODStreamCreated,
-    VODStreamFailed,
-    VODStreamGenerationStarted,
-    VODStreamReady,
-)
 
 logger = logging.getLogger(__name__)
 
@@ -50,12 +44,6 @@ def register_all_events(registry: EventRegistry) -> None:
     registry.register("ClipRequested", ClipRequested)
     registry.register("ClipReady", ClipReady)
     registry.register("ClipFailed", ClipFailed)
-
-    # VOD events
-    registry.register("VODStreamCreated", VODStreamCreated)
-    registry.register("VODStreamGenerationStarted", VODStreamGenerationStarted)
-    registry.register("VODStreamReady", VODStreamReady)
-    registry.register("VODStreamFailed", VODStreamFailed)
 
     logger.info("✅ %d Domain Events registrados", len(registry._event_types))
 
@@ -98,20 +86,8 @@ async def subscribe_all_handlers(bus: DomainEventBus | None) -> None:
         # - Atualizar status no banco
         # - Disparar webhook para cliente
 
-    # Exemplo: handler para VODStreamReady
-    async def on_vod_stream_ready(event: VODStreamReady) -> None:
-        logger.info(
-            "VOD Stream pronto: stream_id=%s playlist=%s",
-            event.stream_id,
-            event.playlist_path,
-        )
-        # Aqui poderia:
-        # - Invalidar cache de URLs
-        # - Notificar frontend via SSE
-
     # Subscrever handlers
     target_bus.subscribe("CameraActivated", on_camera_activated)
     target_bus.subscribe("ClipReady", on_clip_ready)
-    target_bus.subscribe("VODStreamReady", on_vod_stream_ready)
 
     logger.info("✅ %d handlers de eventos subscritos", target_bus.handler_count)

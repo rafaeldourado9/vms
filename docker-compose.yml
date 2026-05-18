@@ -84,8 +84,11 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
       - ENVIRONMENT=${ENVIRONMENT:-production}
       - VMS_API_KEY=${VMS_API_KEY:-dev-analytics-key}
+      - VMS_LOG_RAW_WEBHOOKS=${VMS_LOG_RAW_WEBHOOKS:-}
     volumes:
       - recordings:/recordings
+      - snapshots:/snapshots
+      - reports:/reports
       - vod_streams:/tmp/vod
       - tunnel_data:/tunnel:ro
     depends_on:
@@ -96,7 +99,7 @@ services:
       rabbitmq:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      test: ["CMD", "curl", "-f", "http://localhost:8000/api/v1/health/"]
       interval: 10s
       timeout: 5s
       retries: 10
@@ -114,6 +117,7 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - RABBITMQ_URL=amqp://${RABBITMQ_USER:-vms}:${RABBITMQ_PASSWORD:-vmsdev}@rabbitmq:5672/
       - SECRET_KEY=${SECRET_KEY:-dev-secret-change-in-prod}
+      - MEDIAMTX_API_URL=http://mediamtx:9997
       - RECORDINGS_PATH=/recordings
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
@@ -128,6 +132,32 @@ services:
       interval: 30s
       timeout: 10s
       retries: 3
+    networks: [vms]
+
+  # ─── Worker Low Priority (Relatórios PDF) ─────────────────────────────────
+  worker-low:
+    build:
+      context: ./api
+      target: production
+    restart: unless-stopped
+    command: python -m arq vms.worker.LowPriorityWorkerSettings
+    environment:
+      - DATABASE_URL=postgresql+asyncpg://${POSTGRES_USER:-vms}:${POSTGRES_PASSWORD:-vmsdev}@postgres:5432/${POSTGRES_DB:-vms}
+      - REDIS_URL=redis://redis:6379/0
+      - RABBITMQ_URL=amqp://${RABBITMQ_USER:-vms}:${RABBITMQ_PASSWORD:-vmsdev}@rabbitmq:5672/
+      - SECRET_KEY=${SECRET_KEY:-dev-secret-change-in-prod}
+      - MEDIAMTX_API_URL=http://mediamtx:9997
+      - RECORDINGS_PATH=/recordings
+      - REPORTS_PATH=/reports
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    volumes:
+      - recordings:/recordings
+      - reports:/reports
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks: [vms]
 
   # ─── Analytics Service (IA em tempo real) ───────────────────────────────────
@@ -152,10 +182,14 @@ services:
       - LOG_LEVEL=${LOG_LEVEL:-INFO}
     volumes:
       - ./analytics/models:/models:ro
+      - snapshots:/snapshots
     depends_on:
-      - api
-      - mediamtx
-      - redis
+      api:
+        condition: service_healthy
+      mediamtx:
+        condition: service_started
+      redis:
+        condition: service_started
     healthcheck:
       test: ["CMD", "python", "-c", "import httpx; httpx.get('http://localhost:8001/health').raise_for_status()"]
       interval: 30s
@@ -287,10 +321,12 @@ services:
 volumes:
   pgdata:
   recordings:
+  snapshots:
   vod_streams:
   backups:
   tunnel_data:
   edge_agent_data:
+  reports:
 
 networks:
   vms:

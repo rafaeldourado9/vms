@@ -34,12 +34,7 @@ interface Props {
 const SPEEDS = [0.5, 1, 2, 4]
 const EVENT_COLORS: Record<string, string> = {
   alpr_detected: '#f59e0b',
-  intrusion: '#ef4444',
-  people_count: '#3b82f6',
-  vehicle_count: '#8b5cf6',
-  fire_smoke: '#ef4444',
-  ppe_detection: '#22c55e',
-  default: '#6b7280',
+  default: '#f59e0b',
 }
 
 function pad(n: number) { return String(n).padStart(2, '0') }
@@ -282,29 +277,20 @@ export function CameraTimeline({
             onWheel={onWheel}
           >
             {/* Segment fills */}
-            {visibleSegs.map(({ key, left, width, seg }) => {
-              // Check if this segment has critical events
-              const hasCritical = events.some(ev => {
-                const evTime = new Date(ev.occurred_at).getTime()
-                const segStart = new Date(seg.started_at).getTime()
-                const segEnd = new Date(seg.ended_at).getTime()
-                return evTime >= segStart && evTime <= segEnd && (ev.event_type.includes('intrusion') || ev.event_type.includes('fire'))
-              })
-              return (
-                <div
-                  key={key}
-                  className="absolute top-0"
-                  style={{
-                    left:       `${left}%`,
-                    width:      `${Math.max(0.3, width)}%`,
-                    height:     '100%',
-                    borderRadius: 3,
-                    background: hasCritical ? '#ef4444' : '#0ea5e9',
-                    opacity:    0.85,
-                  }}
-                />
-              )
-            })}
+            {visibleSegs.map(({ key, left, width }) => (
+              <div
+                key={key}
+                className="absolute top-0"
+                style={{
+                  left:       `${left}%`,
+                  width:      `${Math.max(0.3, width)}%`,
+                  height:     '100%',
+                  borderRadius: 3,
+                  background: '#0ea5e9',
+                  opacity:    0.85,
+                }}
+              />
+            ))}
 
             {/* Event markers ◆ */}
             {eventMarkers.map(ev => (
@@ -388,16 +374,7 @@ export function CameraTimeline({
             <span style={{ color: '#0ea5e9' }}>━</span> Gravação
           </span>
           <span className="flex items-center gap-1">
-            <span style={{ color: '#ef4444' }}>━</span> Evento crítico
-          </span>
-          <span className="flex items-center gap-1">
             <span style={{ color: '#f59e0b' }}>◆</span> ALPR
-          </span>
-          <span className="flex items-center gap-1">
-            <span style={{ color: '#ef4444' }}>◆</span> Intrusão
-          </span>
-          <span className="flex items-center gap-1">
-            <span style={{ color: '#3b82f6' }}>◆</span> Pessoas
           </span>
         </div>
       )}

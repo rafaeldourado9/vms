@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { Plus, Pencil, Trash2, SlidersHorizontal, Camera } from 'lucide-react'
 import { clsx } from 'clsx'
 import { PLUGIN_NAMES } from '@/constants/plugins'
+import { Tooltip } from '@/components/ui/Tooltip'
 import type { ROI } from '@/services/analytics'
 import type { Camera as CameraType } from '@/types'
 
@@ -13,10 +14,11 @@ interface Props {
   onEdit: (roi: ROI) => void
   onDelete: (roi: ROI) => void
   onToggleActive: (roi: ROI) => void
+  onSelect?: (roi: ROI) => void // Bug 6: handler de seleção
 }
 
 export function ROIListPanel({
-  rois, cameras, loading, onCreate, onEdit, onDelete, onToggleActive,
+  rois, cameras, loading, onCreate, onEdit, onDelete, onToggleActive, onSelect,
 }: Props) {
   const [filterCamera, setFilterCamera] = useState('all')
   const [filterPlugin, setFilterPlugin] = useState('all')
@@ -54,13 +56,15 @@ export function ROIListPanel({
         <span className="text-sm font-semibold text-t1">
           ROIs ({filtered.length})
         </span>
-        <button
-          onClick={onCreate}
-          className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-white transition"
-          style={{ background: 'var(--accent)' }}
-        >
-          <Plus size={13} /> Nova
-        </button>
+        <Tooltip content="Aguarde o carregamento do vídeo para desenhar a zona" placement="bottom">
+          <button
+            onClick={onCreate}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-medium text-white transition"
+            style={{ background: 'var(--accent)' }}
+          >
+            <Plus size={13} /> Nova
+          </button>
+        </Tooltip>
       </div>
 
       {/* Filters */}
@@ -143,8 +147,9 @@ export function ROIListPanel({
                 {camRois.map((r) => (
                   <div
                     key={r.id}
-                    className="flex items-center gap-2 px-4 py-2 hover:bg-elevated/50 transition-colors group"
+                    className="flex items-center gap-2 px-4 py-2 hover:bg-elevated/50 transition-colors group cursor-pointer"
                     style={{ borderBottom: '1px solid var(--border)' }}
+                    onClick={() => onSelect?.(r)} // Bug 6: clicar na ROI seleciona
                   >
                     {/* Active dot */}
                     <button

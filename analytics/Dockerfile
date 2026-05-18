@@ -17,8 +17,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # Garante pip e setuptools atualizados antes de instalar dependências
 RUN pip install --no-cache-dir --upgrade pip setuptools wheel
 
+# Torch CPU em camada própria: wheel menor (~200 MB) do index oficial PyTorch,
+# isolado do resto das deps para sobreviver a quedas de conexão (layer cache).
+RUN pip install --no-cache-dir --retries 20 --timeout 600 \
+    torch torchvision \
+    --index-url https://download.pytorch.org/whl/cpu
+
 COPY pyproject.toml .
-RUN mkdir -p src && pip install --no-cache-dir .
+RUN mkdir -p src && pip install --no-cache-dir --retries 20 --timeout 600 .
 
 # ─── Produção GPU (CUDA) ───────────────────────────────────────────────────
 FROM nvidia/cuda:12.4.1-runtime-ubuntu22.04 AS gpu
@@ -49,13 +55,13 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONPATH=/app/src
 
 # Instalar PyTorch com suporte a CUDA
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
-    pip install --no-cache-dir \
+RUN pip install --no-cache-dir --upgrade pip setuptools wheel
+RUN pip install --no-cache-dir --retries 20 --timeout 600 \
     torch torchvision \
     --index-url https://download.pytorch.org/whl/cu124
 
 COPY pyproject.toml .
-RUN mkdir -p src && pip install --no-cache-dir .
+RUN mkdir -p src && pip install --no-cache-dir --retries 20 --timeout 600 .
 
 COPY src/ src/
 

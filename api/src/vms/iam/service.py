@@ -2,7 +2,7 @@
 
 import uuid
 
-from vms.shared.exceptions import UnauthorizedError, DuplicateError, NotFoundError
+from vms.shared.exceptions import AuthenticationError, ConflictError, NotFoundError, UnauthorizedError
 from vms.infrastructure.security import (
     create_access_token,
     create_refresh_token,
@@ -31,7 +31,7 @@ class TenantService:
         """
         existing = await self._tenants.get_by_slug(slug)
         if existing:
-            raise DuplicateError(f"Slug '{slug}' já está em uso")
+            raise ConflictError(f"Slug '{slug}' já está em uso")
 
         tenant = Tenant(
             id=str(uuid.uuid4()),
@@ -79,7 +79,7 @@ class UserService:
 
         existing = await self._users.get_by_email(email, tenant_id)
         if existing:
-            raise DuplicateError(f"Email '{email}' já cadastrado neste tenant")
+            raise ConflictError(f"Email '{email}' já cadastrado neste tenant")
 
         user = User(
             id=str(uuid.uuid4()),
@@ -94,6 +94,29 @@ class UserService:
     async def get_user(self, user_id: str, tenant_id: str) -> User:
         """Retorna usuário por ID dentro do tenant."""
         user = await self._users.get_by_id(user_id, tenant_id)
+        if not user:
+            raise NotFoundError("Usuário", user_id)
+        return user
+
+    async def update_user(
+        self,
+        user_id: str,
+        tenant_id: str,
+        role: UserRole | None = None,
+        is_active: bool | None = None,
+        password: str | None = None,
+    ) -> User:
+        """Atualiza role, status ou senha do usuário."""
+        fields: dict[str, object] = {}
+        if role is not None:
+            fields["role"] = role.value
+        if is_active is not None:
+            fields["is_active"] = is_active
+        if password is not None:
+            fields["hashed_password"] = hash_password(password)
+        if not fields:
+            return await self.get_user(user_id, tenant_id)
+        user = await self._users.patch(user_id, tenant_id, **fields)
         if not user:
             raise NotFoundError("Usuário", user_id)
         return user
@@ -123,10 +146,10 @@ class AuthService:
         """
         user = await self._users.get_by_email(email, tenant_id)
         if not user or not user.is_active:
-            raise UnauthorizedError()
+            raise AuthenticationError("Credenciais inválidas")
 
         if not verify_password(password, user.hashed_password):
-            raise UnauthorizedError()
+            raise AuthenticationError("Credenciais inválidas")
 
         access = create_access_token(user.id, user.tenant_id, user.role.value)
         refresh = create_refresh_token(user.id, user.tenant_id)
@@ -141,20 +164,20 @@ class AuthService:
         try:
             payload = decode_token(refresh_token)
             if payload.get("type") != "refresh":
-                raise UnauthorizedError("Token de refresh inválido")
+                raise AuthenticationError("Token de refresh inválido")
 
             user = await self._users.get_by_id(payload["sub"], payload["tenant_id"])
             if not user or not user.is_active:
-                raise UnauthorizedError("Usuário inativo")
+                raise AuthenticationError("Usuário inativo")
 
             access = create_access_token(user.id, user.tenant_id, user.role.value)
             new_refresh = create_refresh_token(user.id, user.tenant_id)
             return access, new_refresh
 
         except KeyError as exc:
-            raise UnauthorizedError("Claims do token ausentes") from exc
+            raise AuthenticationError("Claims do token ausentes") from exc
         except Exception as exc:
-            raise UnauthorizedError("Token de refresh inválido") from exc
+            raise AuthenticationError("Token de refresh inválido") from exc
 
     async def issue_viewer_token(self, tenant_id: str, camera_id: str) -> str:
         """Emite token JWT de curta duração para um viewer de stream."""

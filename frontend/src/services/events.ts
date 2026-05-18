@@ -4,6 +4,7 @@ import type { VmsEvent } from '@/types'
 interface ListEventsParams {
   camera_id?: string
   event_type?: string
+  source?: 'lpr' | 'analytics'
   plate?: string
   occurred_after?: string
   occurred_before?: string

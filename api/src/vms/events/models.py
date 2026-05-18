@@ -42,6 +42,7 @@ class VmsEventModel(Base):
     event_type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
     plate: Mapped[str | None] = mapped_column(String(20), nullable=True)
     confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    image_path: Mapped[str | None] = mapped_column(String(500), nullable=True)
     payload: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     occurred_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),

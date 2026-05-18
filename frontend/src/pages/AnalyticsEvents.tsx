@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { ShieldAlert, RefreshCw, Camera, SlidersHorizontal, Film } from 'lucide-react'
+import { ShieldAlert, RefreshCw, Camera, SlidersHorizontal, Film, ImageOff } from 'lucide-react'
 import { clsx } from 'clsx'
 import { analyticsService, type AnalyticsEvent } from '@/services/analytics'
 import { PLUGIN_NAMES } from '@/constants/plugins'
+import { getEventTypeLabel, getEventTypeColor } from '@/constants/eventTypes'
 
 const SEVERITY_STYLE: Record<string, string> = {
   critical: 'bg-red-500/10 text-red-400 border-red-500/30',
@@ -95,6 +96,7 @@ export function AnalyticsEvents() {
                 payload: data.data || data.payload || {},
                 occurred_at: data.occurred_at || new Date().toISOString(),
                 created_at: new Date().toISOString(),
+                snapshot_url: null,
               }
               return [newEvent, ...prev].slice(0, 200)
             })
@@ -232,6 +234,7 @@ export function AnalyticsEvents() {
         <table className="w-full text-sm">
           <thead style={{ background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
             <tr>
+              <th className="px-3 py-3 w-16" />
               <th className="text-left px-4 py-3 text-xs text-t3 font-medium">Severidade</th>
               <th className="text-left px-4 py-3 text-xs text-t3 font-medium">Câmera</th>
               <th className="text-left px-4 py-3 text-xs text-t3 font-medium">Plugin</th>
@@ -245,7 +248,7 @@ export function AnalyticsEvents() {
             {loading ? (
               Array.from({ length: 6 }).map((_, i) => (
                 <tr key={i} style={{ borderBottom: '1px solid var(--border)' }}>
-                  {Array.from({ length: 7 }).map((__, j) => (
+                  {Array.from({ length: 8 }).map((__, j) => (
                     <td key={j} className="px-4 py-3">
                       <div className="h-3 rounded animate-pulse" style={{ background: 'var(--elevated)', width: '70%' }} />
                     </td>
@@ -254,58 +257,99 @@ export function AnalyticsEvents() {
               ))
             ) : events.length === 0 ? (
               <tr>
-                <td colSpan={7} className="px-4 py-12 text-center text-sm text-t3">
+                <td colSpan={8} className="px-4 py-12 text-center text-sm text-t3">
                   Nenhuma detecção encontrada
                 </td>
               </tr>
-            ) : events.map(ev => (
-              <tr
-                key={ev.id}
-                style={{ borderBottom: '1px solid var(--border)' }}
-                className="hover:bg-elevated/50 transition-colors"
-              >
-                <td className="px-4 py-3">
-                  <span className={clsx('px-2 py-0.5 rounded text-xs font-medium border', SEVERITY_STYLE[ev.severity])}>
-                    {SEVERITY_LABEL[ev.severity] ?? ev.severity}
-                  </span>
-                </td>
-                <td className="px-4 py-3 text-t1 text-xs">{ev.camera_name ?? ev.camera_id}</td>
-                <td className="px-4 py-3 text-t2 text-xs">{PLUGIN_NAMES[ev.plugin_id] ?? ev.plugin_id}</td>
-                <td className="px-4 py-3 text-t1 text-xs font-medium">{ev.event_type}</td>
-                <td className="px-4 py-3">
-                  {ev.confidence != null ? (
-                    <div className="flex items-center gap-2">
-                      <div className="w-14 h-1 rounded-full overflow-hidden" style={{ background: 'var(--surface)' }}>
-                        <div
-                          className={clsx(
-                            'h-full rounded-full',
-                            ev.confidence >= 0.9 ? 'bg-green-500' :
-                            ev.confidence >= 0.7 ? 'bg-yellow-500' : 'bg-red-500',
-                          )}
-                          style={{ width: `${ev.confidence * 100}%` }}
-                        />
-                      </div>
-                      <span className="text-t2 text-xs tabular-nums">{(ev.confidence * 100).toFixed(0)}%</span>
+            ) : events.map(ev => {
+              const typeColor = getEventTypeColor(ev.event_type)
+              return (
+                <tr
+                  key={ev.id}
+                  style={{ borderBottom: '1px solid var(--border)' }}
+                  className="hover:bg-elevated/50 transition-colors"
+                >
+                  {/* Thumbnail — Bug 4: placeholder com fallback */}
+                  <td className="px-3 py-2">
+                    {ev.snapshot_url ? (
+                      <img
+                        src={ev.snapshot_url}
+                        alt="snapshot"
+                        className="rounded object-cover"
+                        style={{ width: 56, height: 36, background: '#111' }}
+                        onError={(e) => {
+                          const target = e.target as HTMLImageElement
+                          target.style.display = 'none'
+                          const placeholder = target.nextElementSibling as HTMLElement
+                          if (placeholder) placeholder.style.display = 'flex'
+                        }}
+                      />
+                    ) : null}
+                    <div
+                      className="rounded flex flex-col items-center justify-center"
+                      style={{
+                        width: 56, height: 36, background: 'var(--elevated)',
+                        display: ev.snapshot_url ? 'none' : 'flex',
+                      }}
+                    >
+                      <ImageOff size={12} className="text-t3/40" />
                     </div>
-                  ) : (
-                    <span className="text-t3 text-xs">—</span>
-                  )}
-                </td>
-                <td className="px-4 py-3 text-t3 text-xs tabular-nums">{fmtTime(ev.occurred_at)}</td>
-                <td className="px-4 py-3">
-                  <button
-                    onClick={() => navigate(
-                      `/recordings?camera_id=${ev.camera_id}&date=${ev.occurred_at.split('T')[0]}`
+                  </td>
+                  <td className="px-4 py-3">
+                    <span className={clsx('px-2 py-0.5 rounded text-xs font-medium border', SEVERITY_STYLE[ev.severity])}>
+                      {SEVERITY_LABEL[ev.severity] ?? ev.severity}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3 text-t1 text-xs">{ev.camera_name ?? ev.camera_id}</td>
+                  <td className="px-4 py-3 text-t2 text-xs">{PLUGIN_NAMES[ev.plugin_id] ?? ev.plugin_id}</td>
+                  <td className="px-4 py-3 text-t1 text-xs font-medium">
+                    {/* Melhoria 10: label em português + Melhoria 11: badge colorida */}
+                    <span
+                      className="inline-block text-[10px] font-medium px-2 py-0.5 rounded-full"
+                      style={{
+                        background: typeColor.bg,
+                        color: typeColor.text,
+                        border: `1px solid ${typeColor.border}`,
+                      }}
+                    >
+                      {getEventTypeLabel(ev.event_type)}
+                    </span>
+                  </td>
+                  <td className="px-4 py-3">
+                    {ev.confidence != null ? (
+                      <div className="flex items-center gap-2">
+                        <div className="w-14 h-1 rounded-full overflow-hidden" style={{ background: 'var(--surface)' }}>
+                          <div
+                            className={clsx(
+                              'h-full rounded-full',
+                              ev.confidence >= 0.9 ? 'bg-green-500' :
+                              ev.confidence >= 0.7 ? 'bg-yellow-500' : 'bg-red-500',
+                            )}
+                            style={{ width: `${ev.confidence * 100}%` }}
+                          />
+                        </div>
+                        <span className="text-t2 text-xs tabular-nums">{(ev.confidence * 100).toFixed(0)}%</span>
+                      </div>
+                    ) : (
+                      <span className="text-t3 text-xs">—</span>
                     )}
-                    className="flex items-center gap-1 text-[11px] text-t3 hover:text-accent transition-colors"
-                    title="Ver gravação deste horário"
-                  >
-                    <Film size={11} />
-                    Gravação
-                  </button>
-                </td>
-              </tr>
-            ))}
+                  </td>
+                  <td className="px-4 py-3 text-t3 text-xs tabular-nums">{fmtTime(ev.occurred_at)}</td>
+                  <td className="px-4 py-3">
+                    <button
+                      onClick={() => navigate(
+                        `/recordings?camera_id=${ev.camera_id}&date=${ev.occurred_at.split('T')[0]}`
+                      )}
+                      className="flex items-center gap-1 text-[11px] text-t3 hover:text-accent transition-colors"
+                      title="Ver gravação deste horário"
+                    >
+                      <Film size={11} />
+                      Gravação
+                    </button>
+                  </td>
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>

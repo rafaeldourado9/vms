@@ -129,13 +129,13 @@ class TestAlprDedup:
     async def test_event_type_is_alpr_detected(
         self, mock_settings, mock_pub, svc, redis_mock
     ):
-        """Evento criado tem event_type='alpr.detected'."""
+        """Evento criado tem event_type='alpr_detected'."""
         mock_settings.return_value.alpr_dedup_ttl_seconds = 60
         redis_mock.set = AsyncMock(return_value=True)
 
         result = await svc.ingest_alpr(_make_detection(), redis_mock)
 
-        assert result.event_type == "alpr.detected"
+        assert result.event_type == "alpr_detected"
 
     @patch("vms.events.service.publish_event", new_callable=AsyncMock)
     @patch("vms.events.service.get_settings")

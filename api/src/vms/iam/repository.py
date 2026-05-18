@@ -28,6 +28,7 @@ class UserRepositoryPort(Protocol):
     async def get_by_id(self, user_id: str, tenant_id: str) -> User | None: ...
     async def get_by_email(self, email: str, tenant_id: str) -> User | None: ...
     async def create(self, user: User) -> User: ...
+    async def patch(self, user_id: str, tenant_id: str, **fields: object) -> User | None: ...
     async def list_by_tenant(self, tenant_id: str) -> list[User]: ...
 
 
@@ -156,6 +157,21 @@ class UserRepository:
             is_active=user.is_active,
         )
         self._session.add(model)
+        await self._session.flush()
+        await self._session.refresh(model)
+        return _user_to_domain(model)
+
+    async def patch(self, user_id: str, tenant_id: str, **fields: object) -> User | None:
+        """Atualiza campos arbitrários do usuário. Retorna None se não encontrado."""
+        stmt = select(UserModel).where(
+            UserModel.id == user_id,
+            UserModel.tenant_id == tenant_id,
+        )
+        model = await self._session.scalar(stmt)
+        if not model:
+            return None
+        for key, val in fields.items():
+            setattr(model, key, val)
         await self._session.flush()
         await self._session.refresh(model)
         return _user_to_domain(model)

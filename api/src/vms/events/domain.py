@@ -16,6 +16,7 @@ class VmsEvent:
     camera_id: str | None = None
     plate: str | None = None
     confidence: float | None = None
+    image_path: str | None = None
     occurred_at: datetime = field(default_factory=datetime.utcnow)
 
 

@@ -98,9 +98,9 @@ shell: ## Shell na API
 shell-db: ## psql no banco
 	$(COMPOSE) exec postgres psql -U vms -d vms
 
-create-tenant: ## Cria tenant admin (uso: make create-tenant NAME="X" EMAIL="x@y.com" PASS="z")
-	$(COMPOSE) exec $(API_SERVICE) python -m vms.scripts.create_tenant \
-		--name "$(NAME)" --email "$(EMAIL)" --password "$(PASS)"
+seed: ## Cria tenant + admin + license key (uso: make seed NAME="X" SLUG="x" EMAIL="x@y.com" PASS="z")
+	$(COMPOSE) exec $(API_SERVICE) python -m vms.scripts.seed \
+		--name "$(NAME)" --slug "$(SLUG)" --email "$(EMAIL)" --password "$(PASS)"
 
 backup: ## Backup do banco
 	./infra/scripts/backup_db.sh

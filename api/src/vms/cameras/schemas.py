@@ -19,7 +19,7 @@ class CreateCameraRequest(BaseModel):
     longitude: float | None = Field(default=None, ge=-180, le=180)
     ia_enabled: bool = False
     manufacturer: str = Field(default="generic")
-    retention_days: int = Field(default=7, ge=1, le=90)
+    retention_days: int = Field(default=5)
     stream_quality: str = StreamQuality.HIGH
     stream_protocol: str = StreamProtocol.RTSP_PULL
 
@@ -31,6 +31,13 @@ class CreateCameraRequest(BaseModel):
     onvif_url: str | None = Field(default=None, min_length=7, max_length=2000)
     onvif_username: str | None = Field(default=None, max_length=255)
     onvif_password: str | None = Field(default=None, max_length=500)
+
+    @field_validator("retention_days")
+    @classmethod
+    def validate_retention_days(cls, v: int) -> int:
+        if v not in (5, 15, 30):
+            raise ValueError("retention_days deve ser 5, 15 ou 30")
+        return v
 
     @field_validator("rtsp_url", mode="before")
     @classmethod
@@ -86,8 +93,15 @@ class UpdateCameraRequest(BaseModel):
     onvif_username: str | None = Field(default=None, max_length=255)
     onvif_password: str | None = Field(default=None, max_length=500)
     manufacturer: str | None = None
-    retention_days: int | None = Field(default=None, ge=1, le=90)
+    retention_days: int | None = Field(default=None)
     agent_id: str | None = None
+
+    @field_validator("retention_days")
+    @classmethod
+    def validate_retention_days(cls, v: int | None) -> int | None:
+        if v is not None and v not in (5, 15, 30):
+            raise ValueError("retention_days deve ser 5, 15 ou 30")
+        return v
     is_active: bool | None = None
     
     # ISAPI

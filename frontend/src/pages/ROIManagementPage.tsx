@@ -125,19 +125,22 @@ export function ROIManagementPage() {
             onEdit={handleEdit}
             onDelete={setDeleteTarget}
             onToggleActive={handleToggleActive}
+            onSelect={handleEdit} // Bug 6: clicar na ROI abre editor
           />
         </div>
 
-        {/* Right — editor or placeholder */}
-        <div className="flex-1 overflow-hidden" style={{ background: 'var(--background)' }}>
-          {editorMode !== 'closed' ? (
-            <ROIEditorPanel
-              roi={editingRoi ?? undefined}
-              cameras={cameras}
-              plugins={plugins}
-              onSave={handleSave}
-              onCancel={handleCancel}
-            />
+          {/* Right — editor or placeholder */}
+          <div className="flex-1 overflow-hidden" style={{ background: 'var(--background)' }}>
+            {editorMode !== 'closed' ? (
+              // Bug 6: key força re-mount ao trocar entre create/edit, garantindo estado limpo
+              <ROIEditorPanel
+                key={editorMode === 'create' ? 'create' : `edit-${editingRoi?.id}`}
+                roi={editingRoi ?? undefined}
+                cameras={cameras}
+                plugins={plugins}
+                onSave={handleSave}
+                onCancel={handleCancel}
+              />
           ) : (
             <div className="h-full flex flex-col items-center justify-center text-center px-8">
               <div

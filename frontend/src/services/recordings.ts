@@ -108,4 +108,52 @@ export const recordingsService = {
     const { data } = await api.post(`/recordings/${recordingId}/export-forensic`)
     return data
   },
+
+  /**
+   * Cria path temporário no MediaMTX para streaming HLS de um segmento.
+   * O MediaMTX lê o MP4 e serve como HLS (remux, sem reencoding).
+   * Path expira automaticamente em 1h de ociosidade.
+   */
+  async prepareHls(recordingId: string): Promise<{
+    hls_url: string
+    path_name: string
+    recording_id: string
+    camera_id: string
+    started_at: string
+    duration_seconds: number
+  }> {
+    const { data } = await api.post(`/recordings/${recordingId}/hls`)
+    return data
+  },
+
+  /**
+   * URL HLS única cobrindo toda a janela gravada de um dia.
+   * MediaMTX costura os segmentos fMP4 em um m3u8 linear — player
+   * não recarrega a cada 60s. Retorna também intervals para a UI
+   * renderizar gaps na barra de progresso.
+   */
+  async getDayHls(cameraId: string, date: string): Promise<{
+    hls_url: string
+    path_name: string
+    camera_id: string
+    started_at: string
+    ended_at: string
+    window_seconds: number
+    intervals: Array<{
+      id: string
+      started_at: string
+      ended_at: string
+      duration_seconds: number
+    }>
+  }> {
+    const { data } = await api.get(`/cameras/${cameraId}/recordings/day-hls`, {
+      params: { date },
+    })
+    return data
+  },
+
+  /** Remove o path temporário do MediaMTX (cleanup imediato). */
+  async removeHls(recordingId: string): Promise<void> {
+    await api.delete(`/recordings/${recordingId}/hls`)
+  },
 }

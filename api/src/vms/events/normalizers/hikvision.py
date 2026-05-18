@@ -58,10 +58,11 @@ class HikvisionNormalizer:
             logger.debug("Hikvision normalizer: placa vazia, ignorando evento")
             return None
 
-        # Confiança: 0–100 (int) → 0.0–1.0 (float)
+        # Confiança: normaliza para [0.0, 1.0] independente da escala enviada
         confidence_raw = anpr.get("confidence") or raw.get("confidence") or 0
         try:
-            confidence = float(confidence_raw) / 100.0
+            v = float(confidence_raw)
+            confidence = max(0.0, min(1.0, v / 100.0 if v > 1.0 else v))
         except (ValueError, TypeError):
             confidence = 0.0
 

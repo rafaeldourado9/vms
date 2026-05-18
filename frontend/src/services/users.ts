@@ -1,11 +1,17 @@
 import { api } from './api'
-import type { User } from '@/types'
+import type { User, UserRole } from '@/types'
 
 interface CreateUserData {
   email: string
   password: string
   full_name: string
   role?: string
+}
+
+interface UpdateUserData {
+  role?: UserRole
+  is_active?: boolean
+  password?: string
 }
 
 export const usersService = {
@@ -24,8 +30,8 @@ export const usersService = {
     return res.data
   },
 
-  async deactivate(id: string): Promise<User> {
-    const res = await api.patch<User>(`/users/${id}`, { is_active: false })
+  async update(id: string, data: UpdateUserData): Promise<User> {
+    const res = await api.patch<User>(`/users/${id}`, data)
     return res.data
   },
 }

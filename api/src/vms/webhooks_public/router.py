@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 import re
 import xml.etree.ElementTree as ET
 from datetime import datetime, timezone
@@ -27,7 +28,7 @@ from fastapi import APIRouter, Query, Request, status
 from sqlalchemy import select
 
 from vms.cameras.models import CameraModel
-from vms.infrastructure.database import get_session_factory
+from vms.infrastructure.database import get_session_factory, get_db_context
 from vms.events.models import VmsEventModel
 from vms.events.normalizers.base import registry
 from vms.shared.api.rate_limit import limiter
@@ -60,6 +61,20 @@ async def _parse_body(request: Request) -> dict:
     4. fallback: tenta JSON, depois XML
     """
     ct = request.headers.get("content-type", "").lower()
+
+    if os.getenv("VMS_LOG_RAW_WEBHOOKS"):
+        try:
+            raw_preview = (await request.body())[:2048]
+            logger.info(
+                "RAW webhook | path=%s ct=%s ua=%s headers=%s body[0:2k]=%r",
+                request.url.path,
+                ct,
+                request.headers.get("user-agent", "?"),
+                dict(request.headers),
+                raw_preview,
+            )
+        except Exception as exc:
+            logger.debug("Falha ao logar raw webhook: %s", exc)
 
     if "multipart" in ct:
         return await _parse_multipart(request)
@@ -189,9 +204,17 @@ def _elem_to_dict(el: ET.Element) -> dict:
 # ─── Camera resolution ────────────────────────────────────────────────────────
 
 def _get_real_ip(request: Request) -> str:
+    """
+    Extrai o IP real do cliente em ordem de confiabilidade:
+    1. CF-Connecting-IP  — cabeçalho oficial Cloudflare (IP do cliente final)
+    2. X-Forwarded-For   — primeiro IP da cadeia (antes de proxies internos)
+    3. X-Real-IP         — setado pelo nginx (pode ser IP do proxy interno)
+    4. request.client    — fallback direto
+    """
     return (
-        request.headers.get("X-Real-IP")
+        request.headers.get("CF-Connecting-IP")
         or request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+        or request.headers.get("X-Real-IP")
         or (request.client.host if request.client else "")
     )
 
@@ -218,7 +241,7 @@ async def _resolve_camera(
             logger.debug("Câmera resolvida via query param: %s", camera_id_param)
             return result
 
-    # 2. Campo direto no body
+    # 2. Campo direto no body (top-level)
     for key in ("camera_id", "cameraId", "DeviceID", "deviceId", "device_id", "deviceSerial", "serialNo"):
         cam_id = body.get(key)
         if cam_id and isinstance(cam_id, str):
@@ -226,6 +249,19 @@ async def _resolve_camera(
             if result:
                 logger.debug("Câmera resolvida via body[%s]: %s", key, cam_id)
                 return result
+
+    # 2b. Intelbras ITSCAM — DeviceID em Picture.SnapInfo.DeviceID
+    #     O campo "Nº dispos." da câmera é enviado nesse path aninhado
+    snap_device_id = (
+        body.get("Picture", {}).get("SnapInfo", {}).get("DeviceID")
+        if isinstance(body.get("Picture"), dict)
+        else None
+    )
+    if snap_device_id and isinstance(snap_device_id, str):
+        result = await _lookup_by_id(snap_device_id)
+        if result:
+            logger.debug("Câmera resolvida via Picture.SnapInfo.DeviceID: %s", snap_device_id)
+            return result
 
     # 3. Serial embutido no JPEG Intelbras ITSCAM
     serial = _extract_intelbras_serial(body)
@@ -390,35 +426,8 @@ async def _publish_sse(tenant_id: str, event_type: str, data: dict) -> None:
 
 # ─── Hikvision ───────────────────────────────────────────────────────────────
 
-@router.post(
-    "/hik_pro_connect",
-    status_code=status.HTTP_200_OK,
-    summary="Webhook Hikvision Alarm Server",
-    tags=["webhooks-public"],
-)
-@limiter.limit("100/minute")
-async def hikvision_webhook(
-    request: Request,
-    camera_id: str | None = Query(
-        None,
-        description=(
-            "UUID da câmera (configure na URL do Alarm Server). "
-            "Exemplo: /hik_pro_connect?camera_id=<uuid>"
-        ),
-    ),
-) -> dict:
-    """
-    Recebe notificações do Alarm Server Hikvision.
-
-    **Como configurar na câmera:**
-    Configuração → Evento → Definição do Alarme → Servidor de Alarme:
-    - IP/Host: `<seu-dominio>`
-    - URL:     `/hik_pro_connect?camera_id=<uuid-da-camera>`
-    - Porta:   `80`
-    - Protocolo: `HTTP`
-
-    Suporta: multipart/form-data, application/xml, application/json.
-    """
+async def _handle_hikvision(request: Request, camera_id: str | None) -> dict:
+    """Lógica compartilhada entre todas as rotas Hikvision (path custom + ISAPI defaults)."""
     body = await _parse_body(request)
     remote_ip = _get_real_ip(request)
 
@@ -455,10 +464,8 @@ async def hikvision_webhook(
             # Usa EventService.ingest_alpr() para dedup Redis + publish
             from vms.events.service import EventService
             from vms.events.repository import EventRepository
-            from vms.infrastructure.database import get_session_factory
 
-            factory = get_session_factory()
-            async with factory() as session:
+            async with get_db_context() as session:
                 svc = EventService(EventRepository(session))
                 event = await svc.ingest_alpr(detection, request.app.state.redis)
 
@@ -492,8 +499,89 @@ async def hikvision_webhook(
     return {"ok": True, "event_id": str(event.id) if event else None}
 
 
+@router.post(
+    "/hik_pro_connect",
+    status_code=status.HTTP_200_OK,
+    summary="Webhook Hikvision Alarm Server",
+    tags=["webhooks-public"],
+)
+@router.post("/Event", status_code=status.HTTP_200_OK, include_in_schema=False)
+@router.post("/Event/notification/alertStream", status_code=status.HTTP_200_OK, include_in_schema=False)
+@router.post("/ISAPI/Event/notification/alertStream", status_code=status.HTTP_200_OK, include_in_schema=False)
+@router.post("/EventNotificationAlert", status_code=status.HTTP_200_OK, include_in_schema=False)
+@limiter.limit("100/minute")
+async def hikvision_webhook(
+    request: Request,
+    camera_id: str | None = Query(
+        None,
+        description=(
+            "UUID da câmera (configure na URL do Alarm Server). "
+            "Exemplo: /hik_pro_connect?camera_id=<uuid>"
+        ),
+    ),
+) -> dict:
+    """
+    Recebe notificações do Alarm Server Hikvision.
+
+    **Como configurar na câmera:**
+    Configuração → Evento → Definição do Alarme → Servidor de Alarme:
+    - IP/Host: `<seu-dominio>`
+    - URL:     `/hik_pro_connect?camera_id=<uuid-da-camera>`
+    - Porta:   `80`
+    - Protocolo: `HTTP`
+
+    Aceita também os paths default do firmware ISAPI (`/Event`,
+    `/ISAPI/Event/notification/alertStream`, `/EventNotificationAlert`)
+    para câmeras antigas que não permitem URL custom.
+
+    Suporta: multipart/form-data, application/xml, application/json.
+    """
+    return await _handle_hikvision(request, camera_id)
+
+
 # ─── Intelbras ────────────────────────────────────────────────────────────────
 
+def _itscam_ok(body: dict | None = None, device_id: str | None = None) -> dict:
+    """
+    Resposta no formato exigido pelo firmware ITSCAM/Dahua ITCPUSH.
+
+    A câmera espera literalmente {"Result": true, "DeviceID": "<id>"}; qualquer
+    outro shape faz o firmware considerar a entrega falha e retransmitir o
+    mesmo evento eternamente. Mesma exigência vale para /KeepAlive.
+    """
+    if device_id is None and isinstance(body, dict):
+        snap = body.get("Picture", {}).get("SnapInfo", {}) if isinstance(body.get("Picture"), dict) else {}
+        if isinstance(snap, dict):
+            device_id = snap.get("DeviceID") or snap.get("DeviceId") or ""
+    return {"Result": True, "DeviceID": device_id or ""}
+
+
+@router.post(
+    "/intelbras_keepalive",
+    status_code=status.HTTP_200_OK,
+    summary="ITSCAM KeepAlive (Dahua ITCPUSH)",
+    tags=["webhooks-public"],
+)
+@limiter.limit("600/minute")
+async def intelbras_keepalive(request: Request) -> dict:
+    """
+    Heartbeat periódico do firmware ITSCAM. Sem resposta no shape correto
+    a câmera marca o servidor como offline e dispara replay de eventos.
+    Path original na câmera: /NotificationInfo/KeepAlive (roteado pelo nginx).
+    """
+    try:
+        body = await _parse_body(request)
+    except Exception:
+        body = {}
+    return _itscam_ok(body)
+
+
+@router.post(
+    "/intelbras_events/{camera_id}",
+    status_code=status.HTTP_200_OK,
+    summary="Webhook Intelbras (camera_id no path)",
+    tags=["webhooks-public"],
+)
 @router.post(
     "/intelbras_events",
     status_code=status.HTTP_200_OK,
@@ -503,33 +591,36 @@ async def hikvision_webhook(
 @limiter.limit("100/minute")
 async def intelbras_webhook(
     request: Request,
-    camera_id: str | None = Query(None, description="UUID da câmera"),
+    camera_id: str | None = None,
 ) -> dict:
     """
     Recebe eventos de câmeras/DVR/NVR Intelbras.
 
-    **Como configurar:**
-    - URL: `http://<seu-dominio>/intelbras_events?camera_id=<uuid>`
+    **Como configurar (Função Push → campo Cliente):**
+    - URL com path: `https://<dominio>/intelbras_events/<uuid-da-camera>`
+    - URL com query param: `https://<dominio>/intelbras_events?camera_id=<uuid>`
     """
+    # camera_id pode vir do path param ou do query param
+    if camera_id is None:
+        camera_id = request.query_params.get("camera_id")
     body = await _parse_body(request)
     remote_ip = _get_real_ip(request)
 
+    pic = body.get("Picture", {}) if isinstance(body.get("Picture"), dict) else {}
+    pic_name = pic.get("NormalPic", {}).get("PicName", "") if isinstance(pic.get("NormalPic"), dict) else ""
     logger.info(
-        "Intelbras webhook | ip=%s camera_id_param=%s ct=%s body_keys=%s",
+        "Intelbras webhook | ip=%s camera_id_param=%s pic_name=%s",
         remote_ip,
         camera_id,
-        request.headers.get("content-type", "?"),
-        list(body.keys()) if body else "empty",
+        pic_name or "(sem pic_name)",
     )
 
     cam_info = await _resolve_camera(body, remote_ip, camera_id)
     if not cam_info:
+        # Mesmo sem identificar a câmera, responde no shape ITSCAM para a câmera
+        # parar de retransmitir o mesmo evento. Loga warning para diagnóstico.
         logger.warning("Câmera não identificada no webhook Intelbras | ip=%s", remote_ip)
-        return {
-            "ok": False,
-            "reason": "camera_not_found",
-            "hint": "Add ?camera_id=<uuid> to the URL",
-        }
+        return _itscam_ok(body)
 
     tenant_id, cam_id = cam_info
 
@@ -541,15 +632,13 @@ async def intelbras_webhook(
             # normalize() retorna None quando não há placa detectada (ex: Desconhecido)
             if detection is None:
                 logger.debug("Intelbras ITSCAM: frame sem placa detectada — ignorando")
-                return {"ok": True, "event_id": None, "no_plate": True}
+                return _itscam_ok(body)
 
             # Usa EventService.ingest_alpr() para dedup Redis + publish
             from vms.events.service import EventService
             from vms.events.repository import EventRepository
-            from vms.infrastructure.database import get_session_factory
 
-            factory = get_session_factory()
-            async with factory() as session:
+            async with get_db_context() as session:
                 svc = EventService(EventRepository(session))
                 event = await svc.ingest_alpr(detection, request.app.state.redis)
 
@@ -559,12 +648,13 @@ async def intelbras_webhook(
                     detection.plate,
                     cam_id,
                 )
-                return {"ok": True, "event_id": None, "dedup": True}
+                return _itscam_ok(body)
 
             logger.info("ANPR Intelbras | placa=%s camera=%s", detection.plate, cam_id)
-            return {"ok": True, "event_id": event.id}
+            return _itscam_ok(body)
         except Exception as exc:
             logger.error("Erro ao normalizar Intelbras ALPR: %s", exc)
+            return _itscam_ok(body)
 
     # Tenta Smart Events Intelbras
     smart_normalizer = registry.get("intelbras_smart")
@@ -572,21 +662,22 @@ async def intelbras_webhook(
         try:
             detection = smart_normalizer.normalize(body, cam_id, tenant_id)
             # Salva como VmsEvent genérico (não é ALPR, logo não precisa de dedup de placa)
-            event = await _store_event(
+            await _store_event(
                 tenant_id, cam_id,
                 event_type=detection.raw_payload.get("event") or "intelbras_smart_event",
                 payload=detection.raw_payload,
                 confidence=detection.confidence or None,
             )
             logger.info("Smart Event Intelbras | tipo=%s camera=%s", detection.raw_payload.get("event"), cam_id)
-            return {"ok": True, "event_id": str(event.id) if event else None}
+            return _itscam_ok(body)
         except Exception as exc:
             logger.error("Erro ao normalizar Smart Event Intelbras: %s", exc)
+            return _itscam_ok(body)
 
     # Fallback genérico — não salvar se o payload for só JPEG sem campos úteis
     if body.get("Picture") and not body.get("plate") and not body.get("placa") and not body.get("Events"):
         logger.debug("Intelbras: payload Picture sem metadados úteis — ignorando fallback")
-        return {"ok": True, "event_id": None, "no_plate": True}
+        return _itscam_ok(body)
 
     event_type = f"intelbras_{body.get('eventType', body.get('type', body.get('event', 'event')))}"
     plate = body.get("plate") or body.get("licensePlate") or body.get("placa")
@@ -605,7 +696,7 @@ async def intelbras_webhook(
         "plate": plate,
         "event_id": str(event.id) if event else None,
     })
-    return {"ok": True, "event_id": str(event.id) if event else None}
+    return _itscam_ok(body)
 
 
 # ─── Genérico ────────────────────────────────────────────────────────────────
@@ -640,10 +731,8 @@ async def generic_camera_webhook(
                 # Usa EventService.ingest_alpr() para dedup Redis + publish
                 from vms.events.service import EventService
                 from vms.events.repository import EventRepository
-                from vms.infrastructure.database import get_session_factory
 
-                factory = get_session_factory()
-                async with factory() as session:
+                async with get_db_context() as session:
                     svc = EventService(EventRepository(session))
                     event = await svc.ingest_alpr(detection, request.app.state.redis)
 

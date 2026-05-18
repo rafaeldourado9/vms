@@ -1,5 +1,5 @@
 import { useNavigate } from 'react-router-dom'
-import { Play, Settings, Brain } from 'lucide-react'
+import { Play, Settings } from 'lucide-react'
 import { Badge } from '@/components/ui/Badge'
 import { Thumbnail } from './Thumbnail'
 import type { Camera } from '@/types'
@@ -53,11 +53,7 @@ export function CameraCard({ camera }: CameraCardProps) {
           <Badge variant={camera.is_online ? 'success' : 'danger'} dot>
             {camera.is_online ? 'Online' : 'Offline'}
           </Badge>
-          <Badge variant="default">
-            <Brain size={10} />
-            IA
-          </Badge>
-          <span className="text-xs text-t3 ml-auto uppercase">{camera.stream_protocol.replace('_', ' ')}</span>
+<span className="text-xs text-t3 ml-auto uppercase">{camera.stream_protocol.replace('_', ' ')}</span>
         </div>
       </div>
     </div>

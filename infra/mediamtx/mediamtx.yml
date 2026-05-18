@@ -28,6 +28,8 @@ authHTTPExclude:
   - action: api
   - action: metrics
   - action: pprof
+  - action: playback   # VOD — URL gerada pelo backend (autenticado) funciona como pre-signed URL
+  - action: read       # HLS/WebRTC viewers — proteção real é no backend (stream-urls requer JWT)
 
 # ─── Control API ─────────────────────────────────────────────────────────────
 
@@ -101,9 +103,13 @@ webrtcICEServers2:
   #   username: <TURN_USER>
   #   password: <TURN_CRED>
 
-# ─── Playback (desabilitado — VMS serve recordings via Nginx) ────────────────
+# ─── Playback ────────────────────────────────────────────────────────────────
+# Servidor de VOD do MediaMTX — serve fMP4 gravados como HLS.
+# URL: GET /get?path=tenant-{id}/cam-{id}&start=RFC3339&end=RFC3339
+# Nginx expõe em /mediamtx-playback/ → mediamtx:9996
 
-playback: no
+playback: yes
+playbackAddress: :9996
 
 # ─── SRT (desabilitado no MVP) ───────────────────────────────────────────────
 
@@ -119,7 +125,8 @@ pathDefaults:
   # ── Gravação 24/7 ──────────────────────────────────────────────────────────
   record: yes
   # NOTA: recordPath NÃO deve ter extensão — MediaMTX adiciona baseado no recordFormat
-  recordPath: /recordings/%path/%Y/%m/%d/%H-%M-%S
+  # %f = microseconds — obrigatório no MediaMTX v1.17+ para garantir unicidade
+  recordPath: /recordings/%path/%Y/%m/%d/%H-%M-%S-%f
   recordFormat: fmp4
   recordPartDuration: 10s
   recordSegmentDuration: 60s

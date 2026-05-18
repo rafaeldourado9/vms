@@ -5,7 +5,10 @@ import logging
 import re
 from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+import os
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.responses import FileResponse
 from redis.asyncio import Redis
 
 from vms.shared.api.dependencies import CurrentUser, DbSession
@@ -221,10 +224,33 @@ async def mediamtx_segment_ready(body: MediaMTXSegmentPayload, db: DbSession, re
             mediamtx_path=body.path,
         )
 
+        # Invalida cache day-HLS quando segmento de hoje é indexado
+        try:
+            from datetime import timezone as _tz, date as _date
+            redis_client = request.app.state.redis
+            seg_date = segment.started_at
+            if seg_date.tzinfo is None:
+                seg_date = seg_date.replace(tzinfo=_tz.utc)
+            if seg_date.date() == _date.today():
+                cache_key = f"day-hls:{tenant_id}:{camera_id}:{seg_date.strftime('%Y-%m-%d')}"
+                await redis_client.delete(cache_key)
+        except Exception:
+            logger.debug("Falha ao invalidar cache day-HLS (não crítico)", exc_info=True)
+
+        # Enqueue HLS conversion (fMP4 → TS chunks) — must run before playback requests
+        try:
+            arq_redis = request.app.state.arq_redis
+            await arq_redis.enqueue_job(
+                "task_segment_to_hls",
+                file_path=body.segment_path,
+            )
+        except Exception:
+            logger.debug("Falha ao enqueue task_segment_to_hls (não crítico)", exc_info=True)
+
         # Enqueue ARQ task para processamento batch com plugins de IA
         try:
-            redis = request.app.state.arq_redis
-            await redis.enqueue_job(
+            arq_redis = request.app.state.arq_redis
+            await arq_redis.enqueue_job(
                 "task_batch_process_segment",
                 segment_id=segment.id,
                 file_path=body.segment_path,
@@ -264,6 +290,9 @@ async def list_events(
     event_type: str | None = Query(default=None),
     plate: str | None = Query(default=None),
     camera_id: str | None = Query(default=None),
+    source: str | None = Query(default=None, description="'lpr' ou 'analytics'"),
+    occurred_after: datetime | None = Query(default=None),
+    occurred_before: datetime | None = Query(default=None),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> EventListResponse:
@@ -275,11 +304,39 @@ async def list_events(
         event_type=event_type,
         plate=plate,
         camera_id=camera_id,
+        source=source,
+        occurred_after=occurred_after,
+        occurred_before=occurred_before,
         limit=page_size,
         offset=offset,
     )
-    items = [VmsEventResponse.model_validate(e) for e in events]
+    items = []
+    for e in events:
+        item = VmsEventResponse.model_validate(e)
+        if e.image_path:
+            item.image_url = f"/api/v1/events/{e.id}/image"
+        items.append(item)
     return EventListResponse.build(items, total, page, page_size)
+
+
+@router.get("/events/{event_id}/image", include_in_schema=False)
+async def get_event_image(
+    event_id: str,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> Response:
+    """Serve imagem JPEG de um evento VMS (autenticado)."""
+    svc = _event_svc(db)
+    event = await svc.get_event(event_id, current_user.tenant_id)
+
+    if not event or not event.image_path:
+        raise HTTPException(status_code=404, detail="Imagem não encontrada")
+
+    full_path = f"/snapshots/{event.image_path}"
+    if not os.path.isfile(full_path):
+        raise HTTPException(status_code=404, detail="Arquivo de imagem não encontrado")
+
+    return FileResponse(full_path, media_type="image/jpeg")
 
 
 # ─── Helpers ──────────────────────────────────────────────────────────────────

@@ -1,4 +1,12 @@
-"""Plugin de detecção de intrusão — YOLOv8n + polígono."""
+"""Plugin de Cerca Virtual — detecta quando objetos CRUZAM o perímetro de uma ROI.
+
+Diferente do modelo antigo de "presença na zona", este plugin rastreia objetos
+frame-a-frame e emite eventos SOMENTE quando o centroide da bbox cruza a borda
+do polígono (transição fora→dentro ou dentro→fora).
+
+Eventos emitidos:
+- analytics.intrusion.crossed : objeto cruzou a cerca
+"""
 from __future__ import annotations
 
 import logging
@@ -12,37 +20,64 @@ from analytics.core.yolo_base import YOLOPlugin
 logger = logging.getLogger(__name__)
 
 
+def _centroid(bbox: list[float]) -> tuple[float, float]:
+    """Centroide de uma bbox [x1, y1, x2, y2]."""
+    return ((bbox[0] + bbox[2]) / 2.0, (bbox[1] + bbox[3]) / 2.0)
+
+
+def _point_in_polygon(point: tuple[float, float], polygon: list[list[float]]) -> bool:
+    """Ray-casting para verificar se ponto está dentro do polígono normalizado."""
+    x, y = point
+    n = len(polygon)
+    inside = False
+    j = n - 1
+    for i in range(n):
+        xi, yi = polygon[i]
+        xj, yj = polygon[j]
+        if ((yi > y) != (yj > y)) and (x < (xj - xi) * (y - yi) / (yj - yi + 1e-9) + xi):
+            inside = not inside
+        j = i
+    return inside
+
+
+def _iou(a: list[float], b: list[float]) -> float:
+    """IoU entre duas bboxes."""
+    x1 = max(a[0], b[0])
+    y1 = max(a[1], b[1])
+    x2 = min(a[2], b[2])
+    y2 = min(a[3], b[3])
+    inter = max(0, x2 - x1) * max(0, y2 - y1)
+    area_a = (a[2] - a[0]) * (a[3] - a[1])
+    area_b = (b[2] - b[0]) * (b[3] - b[1])
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
 class IntrusionDetectionPlugin(YOLOPlugin):
     """
-    Detecta presença de objetos (padrão: pessoa) dentro de uma ROI.
-
-    Gerenciamento de estado de presença:
-    - intruder.started: intruso entrou na ROI
-    - intruder.ongoing: intruso ainda presente (a cada N s)
-    - intruder.cleared: intruso saiu da ROI
+    Cerca Virtual — detecta cruzamento de perímetro.
 
     Lógica:
-    1. Inferência YOLO no frame completo
-    2. Filtra pelas classes configuradas na ROI
-    3. Para cada ROI, verifica se centroide da bbox está dentro do polígono
-    4. Emite evento.started quando intruso detectado
-    5. Emite evento.ongoing se intruso permanece (a cada ongoing_interval)
-    6. Emite evento.cleared quando intruso some por > grace_frames
+    1. Rastreia cada detecção frame-a-frame via IoU + proximidade
+    2. Guarda estado anterior (dentro/fora do polígono) para cada track
+    3. Emite evento apenas na transição de estado (crossing)
+    4. Cooldown por track para evitar spam
     """
 
-    name = "intrusion_detection"
-    version = "1.0.0"
+    name = "intrusion"
+    version = "2.0.0"
     roi_type = "intrusion"
 
     def __init__(self) -> None:
         super().__init__()
-        # Cooldown por ROI: {roi_id: last_emit_timestamp}
-        self._cooldowns: dict[str, float] = {}
-        # Estado de presença por ROI: {roi_id: {"detected_at": float, "last_seen": float, "count": int}}
-        self._active_intrusions: dict[str, dict] = {}
-        self._ongoing_interval: float = 30.0  # segundos entre eventos ongoing
-        self._grace_frames: int = 10  # frames sem detecção antes de "cleared"
-        self._frame_counts: dict[str, int] = {}
+        # Tracks ativos: {track_id: {"centroid": (x,y), "in_roi": bool, "last_seen": float, "bbox": [...]}}
+        self._tracks: dict[int, dict] = {}
+        self._next_track_id = 0
+        # Cooldown por track após crossing: {track_id: timestamp}
+        self._cross_cooldowns: dict[int, float] = {}
+        self._cooldown_seconds: float = 5.0
+        # TTL para expirar tracks inativos
+        self._track_ttl: float = 2.0  # segundos
 
     async def process_frame(
         self,
@@ -50,28 +85,16 @@ class IntrusionDetectionPlugin(YOLOPlugin):
         metadata: FrameMetadata,
         rois: list[ROIConfig],
     ) -> list[AnalyticsResult]:
-        """Processa frame para detecção de intrusão (modo standalone)."""
-        results: list[AnalyticsResult] = []
-
-        # Coleta todas as classes necessárias de todas as ROIs
         all_classes: set[int] = set()
         for roi in rois:
-            classes = roi.config.get("classes", [0])  # padrão: person
+            classes = roi.config.get("classes", [0])
             all_classes.update(classes)
-
         min_conf = min(
             (roi.config.get("min_confidence", 0.5) for roi in rois),
             default=0.5,
         )
-
-        # Inferência uma vez para todas as ROIs
-        detections = self.detect(
-            frame,
-            conf=min_conf,
-            classes=list(all_classes),
-        )
-
-        return self._process_detections(detections, rois, metadata, min_conf)
+        detections = self.detect(frame, conf=min_conf, classes=list(all_classes))
+        return self._process_detections(detections, rois, metadata)
 
     async def process_shared_frame(
         self,
@@ -80,80 +103,93 @@ class IntrusionDetectionPlugin(YOLOPlugin):
         metadata: FrameMetadata,
         rois: list[ROIConfig],
     ) -> list[AnalyticsResult]:
-        """Processa frame com detecções pré-computadas (shared inference)."""
-        min_conf = min(
-            (roi.config.get("min_confidence", 0.5) for roi in rois),
-            default=0.5,
-        )
-        return self._process_detections(detections, rois, metadata, min_conf)
+        return self._process_detections(detections, rois, metadata)
 
     def _process_detections(
         self,
         detections: list[dict],
         rois: list[ROIConfig],
         metadata: FrameMetadata,
-        min_conf: float,
     ) -> list[AnalyticsResult]:
-        """Lógica comum de processamento de detecções com estado de presença."""
         results: list[AnalyticsResult] = []
-
-        import time
         now = time.monotonic()
 
+        # Expirar tracks antigos
+        expired = [
+            tid for tid, t in self._tracks.items()
+            if now - t["last_seen"] > self._track_ttl
+        ]
+        for tid in expired:
+            self._tracks.pop(tid, None)
+            self._cross_cooldowns.pop(tid, None)
+
+        # Atualizar tracks com novas detecções
+        matched: set[int] = set()
+        for det in detections:
+            cx, cy = _centroid(det["bbox"])
+            best_tid = None
+            best_score = -1.0
+            for tid, track in self._tracks.items():
+                if tid in matched:
+                    continue
+                # Score = IoU * 0.7 + inverso_distancia * 0.3
+                iou = _iou(det["bbox"], track["bbox"])
+                dist = ((cx - track["centroid"][0]) ** 2 + (cy - track["centroid"][1]) ** 2) ** 0.5
+                dist_score = max(0, 1.0 - dist * 5.0)  # normalizado, ~0.2px = limite
+                score = iou * 0.7 + dist_score * 0.3
+                if score > best_score and score > 0.3:
+                    best_score = score
+                    best_tid = tid
+
+            if best_tid is not None:
+                self._tracks[best_tid].update({
+                    "centroid": (cx, cy),
+                    "bbox": det["bbox"],
+                    "last_seen": now,
+                    "detection": det,
+                })
+                matched.add(best_tid)
+            else:
+                tid = self._next_track_id
+                self._next_track_id += 1
+                self._tracks[tid] = {
+                    "centroid": (cx, cy),
+                    "bbox": det["bbox"],
+                    "last_seen": now,
+                    "detection": det,
+                }
+
+        # Verificar transições de estado para cada ROI
         for roi in rois:
             roi_classes = set(roi.config.get("classes", [0]))
             roi_conf = roi.config.get("min_confidence", 0.5)
 
-            # Filtra por classes e confiança desta ROI
-            roi_detections = [
-                d for d in detections
-                if d["class_id"] in roi_classes and d["confidence"] >= roi_conf
-            ]
+            for tid, track in self._tracks.items():
+                det = track.get("detection")
+                if not det or det["class_id"] not in roi_classes or det["confidence"] < roi_conf:
+                    continue
 
-            # Filtra por polígono
-            in_roi = self.filter_in_roi(roi_detections, roi.polygon_points)
-            has_intrusion = len(in_roi) > 0
+                # Verificar se está dentro do polígono desta ROI
+                in_roi = _point_in_polygon(track["centroid"], roi.polygon_points)
+                prev_in = track.get(f"in_roi_{roi.id}")
 
-            # Atualizar frame count para grace period
-            self._frame_counts[roi.id] = self._frame_counts.get(roi.id, 0) + 1
+                # Salvar estado atual
+                track[f"in_roi_{roi.id}"] = in_roi
 
-            if has_intrusion:
-                # Reset grace count
-                self._frame_counts[roi.id] = 0
+                if prev_in is None:
+                    # Primeira vez que vemos este track com esta ROI
+                    continue
 
-                if roi.id not in self._active_intrusions:
-                    # Novo intruso → evento.started
-                    self._active_intrusions[roi.id] = {
-                        "detected_at": now,
-                        "last_seen": now,
-                        "count": 1,
-                    }
-                    self._cooldowns[roi.id] = now  # Reset cooldown
-                    results.append(self._make_result(
-                        roi, in_roi, metadata, "analytics.intrusion.started", now
-                    ))
-                else:
-                    # Intruso ainda presente → verificar ongoing
-                    intrusion = self._active_intrusions[roi.id]
-                    intrusion["last_seen"] = now
-                    intrusion["count"] += 1
+                if prev_in != in_roi:
+                    # Transição! Cruzou a cerca
+                    direction = "enter" if in_roi else "exit"
 
-                    # Evento ongoing a cada N segundos
-                    if now - self._cooldowns.get(roi.id, 0) >= self._ongoing_interval:
-                        self._cooldowns[roi.id] = now
+                    # Verificar cooldown
+                    last_cross = self._cross_cooldowns.get(tid, 0)
+                    if now - last_cross >= self._cooldown_seconds:
+                        self._cross_cooldowns[tid] = now
                         results.append(self._make_result(
-                            roi, in_roi, metadata, "analytics.intrusion.ongoing", now
-                        ))
-            else:
-                # Sem detecção → verificar grace period
-                if roi.id in self._active_intrusions:
-                    grace_count = self._frame_counts.get(roi.id, 0)
-                    if grace_count >= self._grace_frames:
-                        # Intruso saiu → evento.cleared
-                        intrusion = self._active_intrusions.pop(roi.id)
-                        self._cooldowns.pop(roi.id, None)
-                        results.append(self._make_result(
-                            roi, [], metadata, "analytics.intrusion.cleared", now
+                            roi, det, metadata, direction, now
                         ))
 
         return results
@@ -161,31 +197,25 @@ class IntrusionDetectionPlugin(YOLOPlugin):
     def _make_result(
         self,
         roi: ROIConfig,
-        detections: list[dict],
+        detection: dict,
         metadata: FrameMetadata,
-        event_type: str,
+        direction: str,
         now: float,
     ) -> AnalyticsResult:
-        """Cria AnalyticsResult com payload padronizado."""
         return AnalyticsResult(
             plugin=self.name,
             camera_id=metadata.camera_id,
             tenant_id=metadata.tenant_id,
             roi_id=roi.id,
-            event_type=event_type,
+            event_type="analytics.intrusion.crossed",
             payload={
                 "roi_id": roi.id,
                 "roi_name": roi.name,
-                "detection_count": len(detections),
-                "event_subtype": event_type.split(".")[-1],  # started, ongoing, cleared
-                "detections": [
-                    {
-                        "class": d["class_name"],
-                        "confidence": round(d["confidence"], 2),
-                        "bbox": d["bbox"],
-                    }
-                    for d in detections
-                ],
+                "direction": direction,  # "enter" ou "exit"
+                "class": detection["class_name"],
+                "confidence": round(detection["confidence"], 2),
+                "bbox": detection["bbox"],
             },
             occurred_at=metadata.timestamp,
+            confidence=detection["confidence"],
         )

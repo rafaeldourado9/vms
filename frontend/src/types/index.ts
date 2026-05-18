@@ -107,6 +107,7 @@ export interface VmsEvent {
   plate: string | null
   confidence: number | null
   payload: Record<string, unknown>
+  image_url: string | null
   occurred_at: string
 }
 

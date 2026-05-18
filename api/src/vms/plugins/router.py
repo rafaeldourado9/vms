@@ -158,12 +158,14 @@ async def ingest_plugin_event(
         confidence=body.confidence,
         occurred_at=body.occurred_at,
         payload=body.payload,
+        snapshot_path=body.snapshot_path,
     )
 
     # Publicar no canal SSE do tenant para frontend em tempo real
     try:
         from vms.infrastructure.messaging.event_bus import publish_event
         severity = body.payload.get("severity", "info") if body.payload else "info"
+        occurred_at_str = body.occurred_at.isoformat() if body.occurred_at else None
         await publish_event(
             "analytics.event",
             {
@@ -171,7 +173,7 @@ async def ingest_plugin_event(
                 "camera_id": body.camera_id,
                 "severity": severity,
                 "confidence": body.confidence,
-                "occurred_at": body.occurred_at,
+                "occurred_at": occurred_at_str,
             },
             tenant_id=tenant_id,
         )
@@ -193,6 +195,7 @@ async def ingest_plugin_event(
             confidence=body.confidence,
             payload=body.payload or {},
             occurred_at=body.occurred_at or datetime.now(timezone.utc),
+            snapshot_path=body.snapshot_path,
         )
         db.add(analytics_event)
         await db.flush()
@@ -211,10 +214,22 @@ async def list_plugin_rois(
     db: DbSession,
     camera_id: str | None = None,
 ) -> list[dict]:
-    """Retorna ROIs (zonas de detecção) para uso pelos plugins."""
+    """Retorna ROIs (zonas de detecção) para uso pelos plugins.
+
+    Resultado cacheado por 60s em memória — analytics bate neste endpoint
+    a cada câmera processada, então evitar o round-trip ao banco é crítico.
+    """
+    from vms.plugins import roi_cache
+
     tenant_id = await _resolve_plugin_tenant(api_key, db)
+
+    cached = roi_cache.get(tenant_id, camera_id)
+    if cached is not None:
+        return cached
+
     from sqlalchemy import select
     from vms.analytics.models import AnalyticsROI
+
     stmt = select(AnalyticsROI).where(
         AnalyticsROI.tenant_id == tenant_id,
         AnalyticsROI.is_active.is_(True),
@@ -223,7 +238,7 @@ async def list_plugin_rois(
         stmt = stmt.where(AnalyticsROI.camera_id == camera_id)
     result = await db.execute(stmt)
     rois = result.scalars().all()
-    return [
+    data = [
         {
             "id": str(r.id),
             "name": r.name,
@@ -234,6 +249,8 @@ async def list_plugin_rois(
         }
         for r in rois
     ]
+    roi_cache.set(tenant_id, camera_id, data)
+    return data
 
 
 @router.get(

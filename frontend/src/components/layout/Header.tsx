@@ -1,22 +1,30 @@
 import { useLocation } from 'react-router-dom'
-import { Bell, User } from 'lucide-react'
+import { Bell, Menu, User } from 'lucide-react'
 import { useAuthStore } from '@/store/authStore'
 import { useSSE } from '@/hooks/useSSE'
 import { clsx } from 'clsx'
 
 const TITLES: Record<string, string> = {
-  '/dashboard':    'Dashboard',
-  '/cameras':      'Câmeras',
-  '/mosaic':       'Mosaico',
-  '/recordings':   'Gravações',
-  '/analytics':    'Analytics',
-  '/events':       'Eventos',
+  '/dashboard':     'Dashboard',
+  '/cameras':       'Câmeras',
+  '/mosaic':        'Mosaico',
+  '/tactical':      'Visão Tática',
+  '/recordings':    'Gravações',
+  '/events':        'Eventos',
+  '/reports':       'Relatórios',
+  '/audit':         'Auditoria',
+  '/billing':       'Financeiro',
   '/notifications': 'Notificações',
-  '/users':        'Usuários',
-  '/settings':     'Configurações',
+  '/agents':        'Agentes',
+  '/users':         'Usuários',
+  '/settings':      'Configurações',
 }
 
-export function Header() {
+interface HeaderProps {
+  onMenuClick?: () => void
+}
+
+export function Header({ onMenuClick }: HeaderProps) {
   const { pathname } = useLocation()
   const user = useAuthStore((s) => s.user)
   const { connected } = useSSE()
@@ -30,7 +38,17 @@ export function Header() {
       className="h-14 flex items-center justify-between px-4 shrink-0 border-b"
       style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
     >
-      <h1 className="text-sm font-semibold text-t1">{title}</h1>
+      <div className="flex items-center gap-3">
+        {/* Hamburger — only on mobile */}
+        <button
+          className="md:hidden btn btn-ghost w-8 h-8 p-0 rounded-lg"
+          onClick={onMenuClick}
+          aria-label="Menu"
+        >
+          <Menu size={18} />
+        </button>
+        <h1 className="text-sm font-semibold text-t1">{title}</h1>
+      </div>
 
       <div className="flex items-center gap-2">
         {/* SSE status */}

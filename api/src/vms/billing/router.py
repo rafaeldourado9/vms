@@ -251,6 +251,109 @@ license_router = APIRouter(prefix="/licenses", tags=["licenses"])
 def _license_svc(db: DbSession) -> LicenseSvc:
     return LicenseSvc(LicenseRepository(db))
 
+@router.get("/monthly-stats", summary="Estatísticas de uso do mês atual")
+async def get_monthly_stats(claims: CurrentUser, db: DbSession) -> dict:
+    """Retorna dashboard automático de uso mensal do tenant."""
+    from datetime import date, datetime, timezone, timedelta
+    from sqlalchemy import func as sa_func, select, distinct
+    from vms.cameras.models import CameraModel
+    from vms.events.models import VmsEventModel
+    from vms.recordings.models import RecordingSegmentModel
+
+    now = datetime.now(timezone.utc)
+    month_start = datetime(now.year, now.month, 1, tzinfo=timezone.utc)
+    # Próximo mês para calcular fim do mês
+    if now.month == 12:
+        month_end = datetime(now.year + 1, 1, 1, tzinfo=timezone.utc)
+    else:
+        month_end = datetime(now.year, now.month + 1, 1, tzinfo=timezone.utc)
+
+    tid = claims.tenant_id
+
+    # Câmeras
+    cam_total = await db.scalar(
+        select(sa_func.count(CameraModel.id)).where(CameraModel.tenant_id == tid)
+    ) or 0
+    cam_online = await db.scalar(
+        select(sa_func.count(CameraModel.id)).where(
+            CameraModel.tenant_id == tid, CameraModel.is_online.is_(True)
+        )
+    ) or 0
+
+    # Eventos do mês
+    events_total = await db.scalar(
+        select(sa_func.count(VmsEventModel.id)).where(
+            VmsEventModel.tenant_id == tid,
+            VmsEventModel.occurred_at >= month_start,
+            VmsEventModel.occurred_at < month_end,
+        )
+    ) or 0
+
+    # Contagem por tipo (top 10)
+    type_rows = await db.execute(
+        select(VmsEventModel.event_type, sa_func.count(VmsEventModel.id).label("cnt"))
+        .where(
+            VmsEventModel.tenant_id == tid,
+            VmsEventModel.occurred_at >= month_start,
+            VmsEventModel.occurred_at < month_end,
+        )
+        .group_by(VmsEventModel.event_type)
+        .order_by(sa_func.count(VmsEventModel.id).desc())
+        .limit(10)
+    )
+    by_type = {row.event_type: row.cnt for row in type_rows}
+
+    # ALPR: placas detectadas + únicas
+    alpr_total = await db.scalar(
+        select(sa_func.count(VmsEventModel.id)).where(
+            VmsEventModel.tenant_id == tid,
+            VmsEventModel.occurred_at >= month_start,
+            VmsEventModel.occurred_at < month_end,
+            VmsEventModel.event_type == "alpr_detected",
+        )
+    ) or 0
+    alpr_unique = await db.scalar(
+        select(sa_func.count(distinct(VmsEventModel.plate))).where(
+            VmsEventModel.tenant_id == tid,
+            VmsEventModel.occurred_at >= month_start,
+            VmsEventModel.occurred_at < month_end,
+            VmsEventModel.plate.isnot(None),
+        )
+    ) or 0
+
+    # Gravações do mês
+    seg_count = await db.scalar(
+        select(sa_func.count(RecordingSegmentModel.id)).where(
+            RecordingSegmentModel.tenant_id == tid,
+            RecordingSegmentModel.started_at >= month_start,
+            RecordingSegmentModel.started_at < month_end,
+        )
+    ) or 0
+    seg_bytes = await db.scalar(
+        select(sa_func.sum(RecordingSegmentModel.size_bytes)).where(
+            RecordingSegmentModel.tenant_id == tid,
+            RecordingSegmentModel.started_at >= month_start,
+            RecordingSegmentModel.started_at < month_end,
+        )
+    ) or 0
+
+    return {
+        "month": now.strftime("%Y-%m"),
+        "period": {
+            "from": month_start.date().isoformat(),
+            "to": (month_end - timedelta(days=1)).date().isoformat(),
+        },
+        "cameras": {"total": cam_total, "online": cam_online, "offline": cam_total - cam_online},
+        "events": {"total_month": events_total, "by_type": by_type},
+        "recordings": {
+            "segments_month": seg_count,
+            "total_size_bytes": int(seg_bytes),
+            "estimated_gb": round(int(seg_bytes) / (1024 ** 3), 2),
+        },
+        "alpr": {"plates_detected": alpr_total, "unique_plates": alpr_unique},
+    }
+
+
 @license_router.post("", status_code=status.HTTP_201_CREATED, summary="Criar licença para câmera")
 async def create_license(
     claims: CurrentUser, db: DbSession,

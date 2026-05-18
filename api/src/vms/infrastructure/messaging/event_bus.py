@@ -291,7 +291,7 @@ async def publish_event(
     # Bridge para SSE: publica no canal tenant-specific
     if tenant_id:
         try:
-            sse_message = json.dumps({"event": routing_key, "data": payload})
+            sse_message = json.dumps({"event": routing_key, "data": payload}, default=str)
             await event_bus._redis.publish(f"sse:{tenant_id}", sse_message)
         except Exception:
             logger.exception("Falha ao publicar SSE para tenant %s", tenant_id)

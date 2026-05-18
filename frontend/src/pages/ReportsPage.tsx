@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react'
-import { FileText, Download, Plus, RefreshCw, Clock, CheckCircle, XCircle, Loader2 } from 'lucide-react'
+import { FileText, Download, Plus, RefreshCw, Clock, CheckCircle, XCircle, Loader2, Radio, Bell, Video, Search, Brain } from 'lucide-react'
 import { format } from 'date-fns'
 import { reportsService, type ReportItem } from '@/services/reports'
 import { PageSpinner } from '@/components/ui/Spinner'
@@ -7,12 +7,12 @@ import { Modal } from '@/components/ui/Modal'
 import { Badge } from '@/components/ui/Badge'
 import toast from 'react-hot-toast'
 
-const REPORT_TYPES: Record<string, { label: string; icon: string }> = {
-  cameras_status:        { label: 'Status de Câmeras',       icon: '📡' },
-  events_summary:        { label: 'Resumo de Eventos',        icon: '🔔' },
-  recordings_coverage:   { label: 'Cobertura de Gravações',   icon: '📼' },
-  audit_trail:           { label: 'Trilha de Auditoria',      icon: '🔍' },
-  analytics_events:      { label: 'Eventos de Analytics',     icon: '🧠' },
+const REPORT_TYPES: Record<string, { label: string; icon: React.ElementType }> = {
+  cameras_status:        { label: 'Status de Câmeras',       icon: Radio },
+  events_summary:        { label: 'Resumo de Eventos',        icon: Bell },
+  recordings_coverage:   { label: 'Cobertura de Gravações',   icon: Video },
+  audit_trail:           { label: 'Trilha de Auditoria',      icon: Search },
+  analytics_events:      { label: 'Eventos de Analytics',     icon: Brain },
 }
 
 const STATUS_CONFIG: Record<string, { color: string; bg: string; label: string; Icon: React.ElementType }> = {
@@ -123,14 +123,14 @@ export function ReportsPage() {
               </thead>
               <tbody>
                 {reports.map((r) => {
-                  const typeInfo = REPORT_TYPES[r.report_type] ?? { label: r.report_type, icon: '📄' }
+                  const typeInfo = REPORT_TYPES[r.report_type] ?? { label: r.report_type, icon: FileText }
                   const statusCfg = STATUS_CONFIG[r.status] ?? STATUS_CONFIG.pending
 
                   return (
                     <tr key={r.id} className="border-b hover:bg-elevated transition" style={{ borderColor: 'var(--border)' }}>
                       <td className="px-4 py-3">
                         <div className="flex items-center gap-2">
-                          <span className="text-lg">{typeInfo.icon}</span>
+                          <typeInfo.icon size={18} className="text-t3 shrink-0" />
                           <div>
                             <p className="text-sm font-medium text-t1">{typeInfo.label}</p>
                             <p className="text-xs text-t3 font-mono">{r.id.slice(0, 8)}</p>
@@ -217,7 +217,7 @@ export function ReportsPage() {
               onChange={(e) => setSelectedType(e.target.value)}
             >
               {Object.entries(REPORT_TYPES).map(([key, val]) => (
-                <option key={key} value={key}>{val.icon} {val.label}</option>
+                <option key={key} value={key}>{val.label}</option>
               ))}
             </select>
           </div>

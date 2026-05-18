@@ -46,6 +46,10 @@ class PluginEventRequest(BaseModel):
         default_factory=dict,
         description="Dados arbitrários do plugin (zonas, placas, contagens, etc.)",
     )
+    snapshot_path: str | None = Field(
+        default=None,
+        description="Caminho relativo do snapshot JPEG (relativo a /snapshots/)",
+    )
 
 
 class PluginEventResponse(BaseModel):

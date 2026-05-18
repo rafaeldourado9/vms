@@ -1,13 +1,13 @@
 /** Labels pt-BR canonicos para plugins de analytics. */
 export const PLUGIN_NAMES: Record<string, string> = {
-  fire_smoke:      'Incêndio/Fumaça',
-  ppe_detection:   'EPIs',
-  biker_detection: 'Capacete Moto',
-  horse_cart:      'Cavalo/Carroça',
-  intrusion:       'Intrusão',
-  people_count:    'Pessoas',
-  vehicle_count:   'Veículos',
-  lpr:             'Placa (LPR)',
+  intrusion:           'Cerca Virtual',
+  intrusion_detection: 'Cerca Virtual',
+  people_count:        'Contagem de Pessoas',
+  vehicle_count:       'Contagem de Veículos',
+  vehicle_dwell:       'Permanência de Veículo',
+  lpr_parking:         'LPR / Estacionamento',
+  weapon_detection:    'Detecção de Armas',
+  face_recognition:    'Reconhecimento Facial',
 }
 
 /** Cor hex por severidade de evento — usada em marcadores de timeline e chips. */

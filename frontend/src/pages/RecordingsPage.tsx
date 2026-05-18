@@ -1,20 +1,30 @@
+/**
+ * RecordingsPage — NVR playback.
+ *
+ * HLS flow (novo):
+ *   1. On camera/date change → GET /cameras/{id}/recordings/day-hls?date=...
+ *      Retorna UMA url HLS do playback server cobrindo toda a janela do dia.
+ *   2. RecordingPlayer carrega o .m3u8 com hls.js. MediaMTX costura os fMP4
+ *      internamente — nenhum reload ao passar de um segmento para outro.
+ *   3. User seeks via DayProgressTimeline: video.currentTime seek direto,
+ *      zero novas requisições (hls.js baixa só o chunk necessário).
+ */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { Brain, ChevronLeft, ChevronRight, FileSearch, ShieldCheck, VideoOff } from 'lucide-react'
+import { ChevronLeft, ChevronRight, FileSearch, ShieldCheck, VideoOff } from 'lucide-react'
 import { camerasService } from '@/services/cameras'
 import { recordingsService } from '@/services/recordings'
-import { analyticsService, type AnalyticsEvent } from '@/services/analytics'
-import { VideoPlayer } from '@/components/camera/VideoPlayer'
+import { useAuthStore } from '@/store/authStore'
 import { RecordingPlayer } from '@/components/camera/RecordingPlayer'
-import { ModernTimeline, type EventMarker } from '@/components/map/ModernTimeline'
+import { DayProgressTimeline, type DayInterval } from '@/components/camera/DayProgressTimeline'
 import { CustodyChainViewer } from '@/components/recordings/CustodyChainViewer'
 import { ForensicExportModal } from '@/components/recordings/ForensicExportModal'
 import { Modal } from '@/components/ui/Modal'
-import { useAuthStore } from '@/store/authStore'
-import { PLUGIN_NAMES, SEV_STYLE } from '@/constants/plugins'
 import type { Camera, RecordingSegment } from '@/types'
 import type { CustodyChainResult } from '@/services/recordings'
 import toast from 'react-hot-toast'
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
 function shiftDate(iso: string, days: number): string {
   const d = new Date(iso)
@@ -23,13 +33,7 @@ function shiftDate(iso: string, days: number): string {
 }
 
 function fmtTime(iso: string) {
-  return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-}
-
-function fmtTimeFull(iso: string) {
-  return new Date(iso).toLocaleTimeString('pt-BR', {
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  })
+  return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
 }
 
 function fmtDate(iso: string) {
@@ -43,30 +47,50 @@ function fmtDuration(seconds: number) {
   return `${Math.round(seconds / 60)}m`
 }
 
+// ── Component ──────────────────────────────────────────────────────────────────
+
 export function RecordingsPage() {
-  const token = useAuthStore((s) => s.tokens?.access_token ?? '')
   const [searchParams] = useSearchParams()
+  const initCameraId   = searchParams.get('camera_id')
+  const initDate       = searchParams.get('date')
 
-  const initCameraId = searchParams.get('camera_id')
-  const initDate     = searchParams.get('date')
+  const token = useAuthStore((s) => s.tokens?.access_token ?? '')
 
-  const [cameras, setCameras]         = useState<Camera[]>([])
-  const [selCam, setSelCam]           = useState<Camera | null>(null)
-  const [selDate, setSelDate]         = useState(() => initDate ?? new Date().toISOString().split('T')[0])
+  const [cameras,  setCameras ] = useState<Camera[]>([])
+  const [selCam,   setSelCam  ] = useState<Camera | null>(null)
+  const [selDate,  setSelDate ] = useState(() => initDate ?? new Date().toISOString().split('T')[0])
 
-  // Cadeia de Custódia state
-  const [showCustody, setShowCustody] = useState(false)
-  const [custodyData, setCustodyData] = useState<CustodyChainResult | null>(null)
+  // Day HLS state — uma URL cobrindo o dia inteiro
+  const [hlsUrl,         setHlsUrl        ] = useState<string | null>(null)
+  const [windowStartMs,  setWindowStartMs ] = useState<number>(0)
+  const [windowEndMs,    setWindowEndMs   ] = useState<number>(0)
+  const [intervals,      setIntervals     ] = useState<DayInterval[]>([])
+  const [loading,        setLoading       ] = useState(false)
+  const [error,          setError         ] = useState<string | null>(null)
+
+  // Playhead (sincronizado com o player)
+  const [playheadMs, setPlayheadMs] = useState<number>(() => Date.now())
+  const [seekToMs,   setSeekToMs  ] = useState<number | undefined>(undefined)
+  const [playing,    setPlaying   ] = useState(false)
+
+  // Segmentos (só para os atalhos de integridade/forense do badge atual)
+  const [segments, setSegments] = useState<RecordingSegment[]>([])
+  const currentSeg = useMemo(() => {
+    return segments.find((s) => {
+      const s0 = new Date(s.started_at).getTime()
+      const s1 = new Date(s.ended_at).getTime()
+      return playheadMs >= s0 && playheadMs <= s1
+    }) ?? null
+  }, [segments, playheadMs])
+
+  // Cadeia de Custódia
+  const [showCustody,    setShowCustody   ] = useState(false)
+  const [custodyData,    setCustodyData   ] = useState<CustodyChainResult | null>(null)
   const [custodyLoading, setCustodyLoading] = useState(false)
-  const [showForensic, setShowForensic] = useState(false)
-  const [forensicSeg, setForensicSeg] = useState<RecordingSegment | null>(null)
-  const [segments, setSegments]       = useState<RecordingSegment[]>([])
-  const [loading, setLoading]         = useState(false)
-  const [playbackSeg, setPlaybackSeg] = useState<RecordingSegment | null>(null)
-  const [playbackUrl, setPlaybackUrl] = useState<string | null>(null)
-  const [useVOD, setUseVOD]           = useState(true) // Toggle para modo VOD
-  const [analyticsEvents, setAnalyticsEvents] = useState<AnalyticsEvent[]>([])
+  const [showForensic,   setShowForensic  ] = useState(false)
+  const [forensicSeg,    setForensicSeg   ] = useState<RecordingSegment | null>(null)
 
+  // ── Load cameras once ──────────────────────────────────────────────────────
   useEffect(() => {
     camerasService.list({ page_size: 200 }).then((list) => {
       setCameras(list)
@@ -78,86 +102,88 @@ export function RecordingsPage() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // ── Load day HLS on camera/date change ─────────────────────────────────────
+  const loadDay = useCallback(() => {
+    if (!selCam || !token) return
+    setLoading(true)
+    setError(null)
+    setHlsUrl(null)
+
+    recordingsService.getDayHls(selCam.id, selDate)
+      .then((res) => {
+        const startMs = new Date(res.started_at).getTime()
+        const endMs = new Date(res.ended_at).getTime()
+        setWindowStartMs(startMs)
+        setWindowEndMs(endMs)
+        setIntervals(res.intervals)
+        const sep = res.hls_url.includes('?') ? '&' : '?'
+        setHlsUrl(`${res.hls_url}${sep}token=${encodeURIComponent(token)}`)
+        // Posição inicial = último segmento (ponto mais recente)
+        setPlayheadMs(endMs)
+        setSeekToMs(endMs)
+      })
+      .catch((err) => {
+        setError(err?.response?.data?.detail ?? 'Sem gravações nesta data')
+        setIntervals([])
+        setWindowStartMs(0)
+        setWindowEndMs(0)
+      })
+      .finally(() => setLoading(false))
+  }, [selCam, selDate, token])
+
+  useEffect(() => { loadDay() }, [loadDay])
+
+  // Mantém segmentos carregados em paralelo para os botões de integridade
   useEffect(() => {
     if (!selCam) { setSegments([]); return }
-    setLoading(true)
-    setPlaybackUrl(null)
-    setPlaybackSeg(null)
-
-    recordingsService
-      .listSegments({
-        camera_id: selCam.id,
-        started_after:  new Date(selDate + 'T00:00:00').toISOString(),
-        started_before: new Date(selDate + 'T23:59:59.999').toISOString(),
-        page_size: 500,
-      })
-      .then((res) => {
-        const sorted = (res.items ?? []).slice().sort(
-          (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
-        )
-        setSegments(sorted)
-        if (sorted.length > 0) playSeg(sorted[sorted.length - 1])
-      })
-      .catch(() => setSegments([]))
-      .finally(() => setLoading(false))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    const startIso = new Date(selDate + 'T00:00:00').toISOString()
+    const endIso   = new Date(selDate + 'T23:59:59.999').toISOString()
+    recordingsService.listSegments({
+      camera_id: selCam.id,
+      started_after: startIso,
+      started_before: endIso,
+      page_size: 500,
+    }).then((res) => {
+      setSegments((res.items ?? []).slice().sort(
+        (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
+      ))
+    }).catch(() => setSegments([]))
   }, [selCam, selDate])
 
+  // ── Refresh automático para o dia de hoje ─────────────────────────────────
   useEffect(() => {
-    setAnalyticsEvents([])
-    if (!selCam) return
-    analyticsService.getEvents({
-      camera_id:       selCam.id,
-      occurred_after:  new Date(selDate + 'T00:00:00').toISOString(),
-      occurred_before: new Date(selDate + 'T23:59:59.999').toISOString(),
-      limit: 500,
-    })
-      .then(setAnalyticsEvents)
-      .catch(() => setAnalyticsEvents([]))
-  }, [selCam, selDate])
+    const todayStr = new Date().toISOString().split('T')[0]
+    if (selDate !== todayStr || !selCam) return
+    const interval = setInterval(loadDay, 60_000)
+    return () => clearInterval(interval)
+  }, [selDate, selCam, loadDay])
 
-  const playSeg = useCallback((seg: RecordingSegment) => {
-    if (!token) return
-    const url = new URL(seg.file_path, window.location.origin)
-    url.searchParams.set('token', token)
-    setPlaybackSeg(seg)
-    setPlaybackUrl(url.toString())
-  }, [token])
+  // ── Callbacks ──────────────────────────────────────────────────────────────
+  const handleSeek = useCallback((ms: number) => {
+    setPlayheadMs(ms)
+    setSeekToMs(ms)
+  }, [])
 
-  const handleSeek = useCallback((time: Date) => {
-    const hit = segments.find((s) => {
-      const s0 = new Date(s.started_at).getTime()
-      const s1 = new Date(s.ended_at).getTime()
-      return time.getTime() >= s0 && time.getTime() <= s1
-    })
-    if (hit) playSeg(hit)
-  }, [segments, playSeg])
+  const handleTimeUpdate = useCallback((currentMs: number) => {
+    setPlayheadMs(currentMs)
+  }, [])
 
-  const eventMarkers = useMemo<EventMarker[]>(() =>
-    analyticsEvents.map((ev) => ({
-      id:         ev.id,
-      time:       new Date(ev.occurred_at),
-      severity:   ev.severity,
-      plugin_id:  ev.plugin_id,
-      event_type: ev.event_type,
-    })), [analyticsEvents])
+  const handleTogglePlay = useCallback(() => {
+    const video = document.querySelector<HTMLVideoElement>('video')
+    if (!video) return
+    if (video.paused) video.play().catch(() => {})
+    else video.pause()
+    setPlaying(!video.paused)
+  }, [])
 
-  const segmentEvents = useMemo(() => {
-    if (!playbackSeg) return []
-    const s0 = new Date(playbackSeg.started_at).getTime()
-    const s1 = new Date(playbackSeg.ended_at).getTime()
-    return analyticsEvents
-      .filter((ev) => { const t = new Date(ev.occurred_at).getTime(); return t >= s0 && t <= s1 })
-      .sort((a, b) => new Date(a.occurred_at).getTime() - new Date(b.occurred_at).getTime())
-  }, [analyticsEvents, playbackSeg])
-
-  const today      = new Date().toISOString().split('T')[0]
-  const totalMin   = useMemo(
-    () => Math.round(segments.reduce((a, s) => a + s.duration_seconds, 0) / 60),
-    [segments],
+  // ── Stats ──────────────────────────────────────────────────────────────────
+  const today = new Date().toISOString().split('T')[0]
+  const totalMin = useMemo(
+    () => Math.round(intervals.reduce((a, s) => a + s.duration_seconds, 0) / 60),
+    [intervals],
   )
 
-  // ── Cadeia de Custódia handlers ────────────────────────────────────
+  // ── Cadeia de Custódia handlers ────────────────────────────────────────────
   const handleVerifyIntegrity = async (seg: RecordingSegment) => {
     try {
       toast.loading('Verificando integridade...', { id: `integrity-${seg.id}` })
@@ -191,17 +217,14 @@ export function RecordingsPage() {
     setShowForensic(true)
   }
 
+  // ── Render ─────────────────────────────────────────────────────────────────
   return (
-    <div className="-m-4 flex flex-col h-[calc(100vh-3.5rem)]">
+    <div className="flex flex-col h-full overflow-hidden">
 
       {/* ── Toolbar ──────────────────────────────────────────────────── */}
       <div
         className="flex items-center gap-2 px-4 shrink-0 flex-wrap"
-        style={{
-          height: 48,
-          background: 'var(--surface)',
-          borderBottom: '1px solid var(--border)',
-        }}
+        style={{ height: 48, background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}
       >
         {/* Camera selector */}
         <select
@@ -217,7 +240,10 @@ export function RecordingsPage() {
 
         {/* Date nav */}
         <div className="flex items-center gap-0.5">
-          <button className="btn btn-ghost w-7 h-7 p-0" onClick={() => setSelDate((d) => shiftDate(d, -1))}>
+          <button
+            className="btn btn-ghost w-7 h-7 p-0"
+            onClick={() => setSelDate((d) => shiftDate(d, -1))}
+          >
             <ChevronLeft size={14} />
           </button>
           <label
@@ -243,87 +269,45 @@ export function RecordingsPage() {
         </div>
 
         {/* Stats */}
-        <div
-          className="ml-auto flex items-center gap-3 tabular-nums"
-          style={{ fontSize: 11, color: '#525252' }}
-        >
-          {/* Toggle VOD/Legacy */}
-          <button
-            className="flex items-center gap-1.5 px-2 py-1 rounded text-xs font-medium transition-colors"
-            style={{
-              background: useVOD ? '#3b82f6' : 'var(--elevated)',
-              color: useVOD ? 'white' : '#525252',
-              border: '1px solid var(--border)',
-            }}
-            onClick={() => {
-              setUseVOD(!useVOD)
-              if (useVOD) {
-                setPlaybackUrl(null)
-                setPlaybackSeg(null)
-              }
-            }}
-            title={useVOD ? 'Modo VOD (streaming HLS)' : 'Modo legado (MP4 direto)'}
-          >
-            <span className="w-1.5 h-1.5 rounded-full" style={{ background: useVOD ? '#60a5fa' : '#525252' }} />
-            {useVOD ? 'VOD' : 'MP4'}
-          </button>
-
+        <div className="ml-auto flex items-center gap-3 tabular-nums" style={{ fontSize: 11, color: '#525252' }}>
           {loading ? (
             <span>Carregando…</span>
+          ) : error && intervals.length === 0 ? (
+            <span style={{ color: '#ef4444', fontSize: 11 }}>{error}</span>
           ) : (
-            <>
-              <span>{segments.length} seg · {totalMin}min</span>
-              {analyticsEvents.length > 0 && (
-                <span className="flex items-center gap-1" style={{ color: '#3b82f6' }}>
-                  <Brain size={11} strokeWidth={1.5} />
-                  {analyticsEvents.length}
-                </span>
-              )}
-            </>
+            <span>{intervals.length} segmentos · {totalMin}min gravados</span>
           )}
         </div>
       </div>
 
       {/* ── Player ───────────────────────────────────────────────────── */}
       <div className="flex-1 min-h-0 relative bg-black flex items-center justify-center">
-        {loading ? (
+        {hlsUrl ? (
+          <RecordingPlayer
+            hlsUrl={hlsUrl}
+            windowStartMs={windowStartMs}
+            seekToMs={seekToMs}
+            className="w-full h-full"
+            onReady={() => { setLoading(false); setPlaying(true) }}
+            onError={(msg) => setError(msg)}
+            onTimeUpdate={handleTimeUpdate}
+          />
+        ) : loading ? (
           <div
             className="w-8 h-8 rounded-full animate-spin"
             style={{ border: '1.5px solid #1c1c1e', borderTopColor: '#3b82f6' }}
-          />
-        ) : useVOD && playbackSeg ? (
-          // Modo VOD (streaming HLS)
-          <RecordingPlayer
-            segmentIds={[playbackSeg.id]}
-            cameraId={selCam!.id}
-            startsAt={playbackSeg.started_at}
-            endsAt={playbackSeg.ended_at}
-            className="w-full h-full"
-            onReady={() => setLoading(false)}
-            onError={() => setPlaybackUrl(null)}
-          />
-        ) : playbackUrl && playbackSeg ? (
-          // Modo legado (MP4 direto - fallback)
-          <VideoPlayer
-            src={playbackUrl}
-            name={`${selCam?.name} · ${fmtTime(playbackSeg.started_at)}`}
-            className="w-full h-full object-contain"
-            muted
-            autoPlay
           />
         ) : (
           <div className="flex flex-col items-center gap-2" style={{ color: '#2a2a2a' }}>
             <VideoOff size={40} strokeWidth={1} />
             <p style={{ fontSize: 13 }}>
-              {segments.length === 0
-                ? `Sem gravações em ${fmtDate(selDate)}`
-                : 'Selecione um segmento'}
+              {error ?? `Sem gravações em ${fmtDate(selDate)}`}
             </p>
           </div>
         )}
 
-        {/* Segment badge */}
-        {playbackSeg && (
+        {/* ── Badge: posição atual ──────────────────────────────────── */}
+        {hlsUrl && (
           <div
             className="absolute top-3 left-3 flex items-center gap-2 tabular-nums"
             style={{
@@ -335,100 +319,78 @@ export function RecordingsPage() {
               backdropFilter: 'blur(6px)',
             }}
           >
-            <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-            {fmtTime(playbackSeg.started_at)} — {fmtTime(playbackSeg.ended_at)}
-            <span style={{ color: '#404040' }}>{fmtDuration(playbackSeg.duration_seconds)}</span>
-            {useVOD && (
-              <span
-                className="ml-2 px-1.5 py-0.5 rounded text-[9px] font-semibold"
-                style={{ background: '#3b82f6', color: 'white' }}
-              >
-                VOD
-              </span>
+            <span className="w-1.5 h-1.5 rounded-full bg-teal-500" />
+            {new Date(playheadMs).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+            {currentSeg && (
+              <span style={{ color: '#404040' }}>· {fmtDuration(currentSeg.duration_seconds)}</span>
             )}
-            <button
-              className="ml-2 p-0.5 rounded opacity-60 hover:opacity-100 transition-opacity"
-              title="Verificar integridade"
-              onClick={() => handleVerifyIntegrity(playbackSeg)}
+            <span
+              className="ml-1 px-1.5 py-0.5 rounded text-[9px] font-semibold"
+              style={{ background: 'rgba(59,130,246,0.22)', color: '#60a5fa' }}
             >
-              <ShieldCheck size={11} />
-            </button>
-            <button
-              className="p-0.5 rounded opacity-60 hover:opacity-100 transition-opacity"
-              title="Exportar laudo forense"
-              onClick={() => handleExportForensic(playbackSeg)}
-            >
-              <FileSearch size={11} />
-            </button>
+              HLS
+            </span>
+            {currentSeg && (
+              <>
+                <button
+                  className="ml-2 p-0.5 rounded opacity-60 hover:opacity-100 transition-opacity"
+                  title="Verificar integridade"
+                  onClick={() => handleVerifyIntegrity(currentSeg)}
+                >
+                  <ShieldCheck size={11} />
+                </button>
+                <button
+                  className="p-0.5 rounded opacity-60 hover:opacity-100 transition-opacity"
+                  title="Exportar laudo forense"
+                  onClick={() => handleExportForensic(currentSeg)}
+                >
+                  <FileSearch size={11} />
+                </button>
+                <button
+                  className="p-0.5 rounded opacity-60 hover:opacity-100 transition-opacity"
+                  title="Cadeia de custódia"
+                  onClick={() => handleViewCustodyChain(currentSeg)}
+                >
+                  🔗
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
 
-      {/* ── Bottom panel ─────────────────────────────────────────────── */}
+      {/* ── Timeline ─────────────────────────────────────────────────── */}
       <div
         className="shrink-0"
         style={{ background: 'var(--surface)', borderTop: '1px solid var(--border)' }}
       >
-        {/* Timeline */}
-        <div className="px-5 pt-4 pb-2">
-          <ModernTimeline
-            segments={segments}
-            currentTime={playbackSeg ? new Date(playbackSeg.started_at) : new Date()}
-            onSeek={handleSeek}
-            isLoading={loading}
-            selectedDate={selDate}
-            eventMarkers={eventMarkers}
-          />
+        <div className="px-4 pt-4 pb-3">
+          {windowEndMs > windowStartMs ? (
+            <DayProgressTimeline
+              windowStartMs={windowStartMs}
+              windowEndMs={windowEndMs}
+              currentMs={playheadMs}
+              onSeek={handleSeek}
+              playing={playing}
+              onTogglePlay={handleTogglePlay}
+              intervals={intervals}
+            />
+          ) : (
+            <div style={{
+              height: 80,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'rgba(255,255,255,0.3)',
+              fontSize: 12,
+            }}>
+              {loading ? 'Carregando gravações…' : 'Sem gravações neste dia.'}
+            </div>
+          )}
         </div>
-
-        {/* Analytics events strip */}
-        {segmentEvents.length > 0 && (
-          <div
-            className="flex items-center gap-1 px-5 pb-3 overflow-x-auto"
-            style={{
-              scrollbarWidth: 'none',
-              borderTop: '1px solid var(--border)',
-              paddingTop: 8,
-            }}
-          >
-            <span
-              className="flex items-center gap-1 shrink-0 mr-1"
-              style={{ fontSize: 10, color: '#2a2a2a' }}
-            >
-              <Brain size={9} strokeWidth={1.5} />
-            </span>
-            {segmentEvents.map((ev) => {
-              const sev = SEV_STYLE[ev.severity] ?? SEV_STYLE.info
-              return (
-                <div
-                  key={ev.id}
-                  className="shrink-0 flex items-center gap-1 rounded text-[10px]"
-                  style={{
-                    padding: '2px 6px',
-                    background: sev.bg,
-                    color: sev.text,
-                    border: `1px solid ${sev.dot}20`,
-                  }}
-                  title={`${PLUGIN_NAMES[ev.plugin_id] ?? ev.plugin_id} · ${ev.event_type}${ev.confidence != null ? ` · ${(ev.confidence * 100).toFixed(0)}%` : ''}`}
-                >
-                  <span className="w-1 h-1 rounded-full shrink-0" style={{ background: sev.dot }} />
-                  <span className="font-medium">{PLUGIN_NAMES[ev.plugin_id] ?? ev.plugin_id}</span>
-                  <span className="tabular-nums" style={{ opacity: 0.55 }}>
-                    {fmtTimeFull(ev.occurred_at)}
-                  </span>
-                  {ev.confidence != null && (
-                    <span style={{ opacity: 0.45 }}>
-                      {(ev.confidence * 100).toFixed(0)}%
-                    </span>
-                  )}
-                </div>
-              )
-            })}
-          </div>
-        )}
       </div>
 
-      {/* ── Cadeia de Custódia: Custody Chain Modal ──────────────────── */}
+      {/* ── Cadeia de Custódia modals ─────────────────────────────────── */}
       <Modal
         open={showCustody}
         onClose={() => setShowCustody(false)}
@@ -437,7 +399,10 @@ export function RecordingsPage() {
       >
         {custodyLoading ? (
           <div className="py-8 text-center">
-            <div className="w-8 h-8 rounded-full animate-spin mx-auto" style={{ border: '2px solid var(--border)', borderTopColor: 'var(--accent)' }} />
+            <div
+              className="w-8 h-8 rounded-full animate-spin mx-auto"
+              style={{ border: '2px solid var(--border)', borderTopColor: 'var(--accent)' }}
+            />
           </div>
         ) : custodyData ? (
           <CustodyChainViewer entries={custodyData.custody_chain} />
@@ -446,16 +411,13 @@ export function RecordingsPage() {
         )}
       </Modal>
 
-      {/* ── Cadeia de Custódia: Forensic Export Modal ────────────────── */}
       {forensicSeg && (
         <ForensicExportModal
           open={showForensic}
           recordingId={forensicSeg.id}
           recordingLabel={`${selCam?.name ?? ''} · ${fmtTime(forensicSeg.started_at)}`}
           onClose={() => { setShowForensic(false); setForensicSeg(null) }}
-          onExported={() => {
-            handleViewCustodyChain(forensicSeg)
-          }}
+          onExported={() => { handleViewCustodyChain(forensicSeg) }}
         />
       )}
     </div>

@@ -23,13 +23,14 @@ export interface AnalyticsEvent {
   payload: Record<string, unknown>
   occurred_at: string
   created_at: string
+  snapshot_url: string | null
 }
 
 export interface AnalyticsStats {
   total: number
   by_severity: Record<string, number>
   by_plugin: Record<string, number>
-  top_cameras: Array<{ camera_id: string; count: number }>
+  top_cameras: Array<{ camera_id: string; camera_name?: string; count: number }>
   period_hours: number
 }
 

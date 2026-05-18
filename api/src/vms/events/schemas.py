@@ -28,6 +28,7 @@ class VmsEventResponse(BaseModel):
     confidence: float | None
     camera_id: str | None
     payload: dict
+    image_url: str | None = None
     occurred_at: datetime
 
 

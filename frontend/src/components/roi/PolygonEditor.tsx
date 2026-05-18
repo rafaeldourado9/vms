@@ -1,27 +1,30 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { ImageOff } from 'lucide-react'
 import { camerasService } from '@/services/cameras'
+import { VideoPlayer } from '@/components/camera/VideoPlayer'
 
 interface Props {
   cameraId: string
   polygon: number[][]
   onChange: (polygon: number[][]) => void
   disabled?: boolean
+  streamUrl?: string
 }
 
-export function PolygonEditor({ cameraId, polygon, onChange, disabled }: Props) {
+export function PolygonEditor({ cameraId, polygon, onChange, disabled, streamUrl }: Props) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [snapshotUrl, setSnapshotUrl] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
   const [dragging, setDragging] = useState<number | null>(null)
 
   useEffect(() => {
+    if (streamUrl) { setLoading(false); return }
     setLoading(true)
     camerasService.snapshot(cameraId)
       .then(setSnapshotUrl)
       .catch(() => setSnapshotUrl(null))
       .finally(() => setLoading(false))
-  }, [cameraId])
+  }, [cameraId, streamUrl])
 
   const toNormalized = useCallback((e: React.MouseEvent): [number, number] | null => {
     const el = containerRef.current
@@ -85,7 +88,14 @@ export function PolygonEditor({ cameraId, polygon, onChange, disabled }: Props) 
         onMouseUp={handleMouseUp}
         onMouseLeave={handleMouseUp}
       >
-        {snapshotUrl ? (
+        {streamUrl ? (
+          <VideoPlayer
+            src={streamUrl}
+            className="absolute inset-0 w-full h-full !rounded-none"
+            muted
+            autoPlay
+          />
+        ) : snapshotUrl ? (
           <img
             src={snapshotUrl}
             alt="Camera snapshot"

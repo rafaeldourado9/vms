@@ -74,7 +74,7 @@ export function DashboardPage() {
   return (
     <div className="space-y-5 animate-fade-in">
       {/* Stat cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
         {statCards.map(({ label, value, icon: Icon, color }) => (
           <div key={label} className="card px-4 py-4">
             <div className="flex items-center justify-between mb-3">

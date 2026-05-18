@@ -119,9 +119,17 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         settings.redis_url,
         encoding="utf-8",
         decode_responses=False,
+        max_connections=20,          # evita crescimento ilimitado por processo
+        socket_keepalive=True,
+        retry_on_timeout=True,
     )
     app.state.redis = redis_client
-    app.state.arq_redis = aioredis.from_url(settings.redis_url)
+    # ARQ pool para enfileiramento de tasks (conexões separadas do app Redis)
+    from arq import create_pool
+    from arq.connections import RedisSettings as ArqRedisSettings
+    app.state.arq_redis = await create_pool(
+        ArqRedisSettings.from_dsn(settings.redis_url),
+    )
     logger.info("Redis conectado")
 
     # Event Bus (Domain Events via Redis pub/sub)
@@ -144,6 +152,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Shutdown
     await redis_client.aclose()
+    await app.state.arq_redis.aclose()
     await disconnect_event_bus()
     await close_db()
     logger.info("Recursos encerrados")
@@ -161,6 +170,10 @@ def create_app() -> FastAPI:
         redoc_url="/redoc",
         lifespan=lifespan,
     )
+
+    # GZip — comprime respostas de listagem > 1 KB (−60% bandwidth em eventos/recordings)
+    from starlette.middleware.gzip import GZipMiddleware
+    app.add_middleware(GZipMiddleware, minimum_size=1024, compresslevel=4)
 
     # CORS
     origins = (
@@ -218,7 +231,6 @@ def _include_routers(app: FastAPI) -> None:
     from vms.plugins.router import router as plugins_router
     from vms.webhooks_public.router import router as public_webhooks_router
     from vms.analytics.router import router as analytics_router
-    from vms.vod.router import router as vod_router
     from vms.audit.router import router as audit_router
     from vms.reports.router import router as reports_router
     from vms.billing.router import router as billing_router, license_router
@@ -254,9 +266,6 @@ def _include_routers(app: FastAPI) -> None:
 
     # Analytics — catálogo e eventos
     app.include_router(analytics_router, prefix="/api/v1")
-
-    # VOD — streaming de gravações
-    app.include_router(vod_router, prefix="/api/v1")
 
     # Audit — audit trail
     app.include_router(audit_router, prefix="/api/v1")

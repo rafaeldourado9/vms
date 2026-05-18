@@ -23,9 +23,30 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+import cv2
 import numpy as np
 
 logger = logging.getLogger(__name__)
+
+_INFERENCE_LONG_EDGE = 640  # pixels — YOLOv8 treina em 640; não há ganho em passar mais
+
+
+def _downscale_if_needed(frame: np.ndarray) -> np.ndarray:
+    """Reduz o frame para que o maior lado seja ≤ _INFERENCE_LONG_EDGE.
+
+    Preserva aspect ratio. Se o frame já couber, retorna sem copiar.
+    Economiza RAM e CPU de pré-processamento do YOLO (sem perda de precisão,
+    pois o modelo treina em 640×640 e faz resize interno de qualquer forma).
+    """
+    h, w = frame.shape[:2]
+    if max(h, w) <= _INFERENCE_LONG_EDGE:
+        return frame
+    scale = _INFERENCE_LONG_EDGE / max(h, w)
+    return cv2.resize(
+        frame,
+        (int(w * scale), int(h * scale)),
+        interpolation=cv2.INTER_LINEAR,
+    )
 
 # Classes COCO relevantes para plugins de câmeras de segurança
 COCO_CLASSES = {
@@ -97,7 +118,7 @@ class SharedInferenceEngine:
         Executa inferência YOLO no frame.
 
         Args:
-            frame: Frame BGR do OpenCV
+            frame: Frame BGR do OpenCV (qualquer resolução)
             classes: Conjunto de classes COCO para filtrar (None = todas)
             conf: Confiança mínima (0.0-1.0)
 
@@ -108,6 +129,8 @@ class SharedInferenceEngine:
             - confidence: float
             - bbox: [x1, y1, x2, y2] normalizado [0.0, 1.0]
         """
+        frame = _downscale_if_needed(frame)
+
         results = self._model.predict(
             frame,
             imgsz=self._imgsz,
@@ -118,7 +141,7 @@ class SharedInferenceEngine:
 
         detections: list[dict[str, Any]] = []
         if results and results[0].boxes is not None:
-            h, w = frame.shape[:2]
+            h, w = frame.shape[:2]   # dimensões do frame já reduzido (normalizadas corretamente)
             for box in results[0].boxes:
                 x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                 detections.append({
@@ -134,6 +157,47 @@ class SharedInferenceEngine:
                 })
 
         return detections
+
+    def predict_batch(
+        self,
+        frames: list[np.ndarray],
+        classes: set[int] | None = None,
+        conf: float = 0.30,
+    ) -> list[list[dict[str, Any]]]:
+        """Batch inference: N frames em uma chamada ao modelo.
+
+        Amortiza o overhead fixo do YOLO (carregamento de contexto GPU, sync)
+        pelo número de câmeras no batch. Usa _downscale_if_needed em cada frame.
+        Retorna uma lista de detecções por frame, na mesma ordem dos frames.
+        """
+        prepared = [_downscale_if_needed(f) for f in frames]
+        results = self._model.predict(
+            prepared,
+            imgsz=self._imgsz,
+            conf=conf,
+            classes=list(classes) if classes else None,
+            verbose=False,
+        )
+        output: list[list[dict[str, Any]]] = []
+        for frame, result in zip(prepared, results):
+            h, w = frame.shape[:2]
+            detections: list[dict[str, Any]] = []
+            if result.boxes is not None:
+                for box in result.boxes:
+                    x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
+                    detections.append({
+                        "class_id": int(box.cls[0]),
+                        "class_name": result.names[int(box.cls[0])],
+                        "confidence": float(box.conf[0]),
+                        "bbox": [
+                            float(x1 / w),
+                            float(y1 / h),
+                            float(x2 / w),
+                            float(y2 / h),
+                        ],
+                    })
+            output.append(detections)
+        return output
 
     @staticmethod
     def filter_by_class(

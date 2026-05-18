@@ -1,7 +1,10 @@
 """Dispatcher assíncrono de webhooks com HMAC-SHA256."""
+from __future__ import annotations
+
 import json
 import logging
 import uuid
+from contextlib import asynccontextmanager
 
 import httpx
 from datetime import UTC, datetime
@@ -12,14 +15,29 @@ from vms.notifications.domain import NotificationLog, NotificationRule, Notifica
 logger = logging.getLogger(__name__)
 
 
+@asynccontextmanager
+async def _get_client(client: httpx.AsyncClient | None):
+    """Usa o client fornecido (pooled) ou cria um temporário se None."""
+    if client is not None:
+        yield client
+    else:
+        async with httpx.AsyncClient(timeout=10.0, headers={"User-Agent": "VMS-Webhook/1.0"}) as c:
+            yield c
+
+
 async def dispatch_webhook(
     rule: NotificationRule,
     event_type: str,
     event_id: str,
     payload: dict,
+    *,
+    client: httpx.AsyncClient | None = None,
 ) -> NotificationLog:
-    """
-    Envia webhook para destination_url da regra com assinatura HMAC.
+    """Envia webhook para destination_url da regra com assinatura HMAC.
+
+    Passe ``client`` para reutilizar uma conexão keep-alive entre chamadas
+    (obtido de ``ctx["http_client"]`` no worker ARQ).
+    Sem ``client``, cria e fecha um client temporário (modo compatível).
 
     Headers enviados:
     - X-VMS-Signature: sha256={hmac_hex}
@@ -39,15 +57,14 @@ async def dispatch_webhook(
     signature = sign_webhook_payload(body, rule.webhook_secret)
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(
+        async with _get_client(client) as http:
+            response = await http.post(
                 rule.destination_url,
                 content=body,
                 headers={
                     "Content-Type": "application/json",
                     "X-VMS-Signature": f"sha256={signature}",
                     "X-VMS-Event": event_type,
-                    "User-Agent": "VMS-Webhook/1.0",
                 },
             )
 

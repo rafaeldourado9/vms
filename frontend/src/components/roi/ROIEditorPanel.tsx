@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react'
-import { X, Save } from 'lucide-react'
+import { X, Save, Loader2 } from 'lucide-react'
 import { analyticsService, type ROI, type AnalyticsCatalogItem } from '@/services/analytics'
 import { PLUGIN_NAMES } from '@/constants/plugins'
 import { POLYGON_REQUIRED, PLUGIN_CONFIG_SCHEMA } from '@/constants/pluginConfigs'
 import { PolygonEditor } from './PolygonEditor'
 import { PluginConfigForm } from './PluginConfigForm'
+import { camerasService } from '@/services/cameras'
 import type { Camera } from '@/types'
 import toast from 'react-hot-toast'
 
@@ -14,17 +15,49 @@ interface Props {
   plugins: AnalyticsCatalogItem[]
   onSave: () => void
   onCancel: () => void
+  defaultCameraId?: string
 }
 
-export function ROIEditorPanel({ roi, cameras, plugins, onSave, onCancel }: Props) {
+export function ROIEditorPanel({ roi, cameras, plugins, onSave, onCancel, defaultCameraId }: Props) {
   const isEdit = !!roi
 
-  const [cameraId, setCameraId] = useState(roi?.camera_id ?? '')
+  const [cameraId, setCameraId] = useState(roi?.camera_id ?? defaultCameraId ?? '')
   const [pluginId, setPluginId] = useState(roi?.plugin_id ?? '')
   const [name, setName] = useState(roi?.name ?? '')
-  const [polygon, setPolygon] = useState<number[][]>(roi?.polygon ?? [])
-  const [config, setConfig] = useState<Record<string, unknown>>(roi?.config ?? {})
+  const [polygon, setPolygon] = useState(roi?.polygon ?? [])
+  const [config, setConfig] = useState(roi?.config ?? {})
   const [saving, setSaving] = useState(false)
+  const [streamUrl, setStreamUrl] = useState<string | null>(null)
+  const [streamReady, setStreamReady] = useState(false) // Bug 5: controle de carregamento do stream
+
+  // Bug 6: sincroniza estado quando a ROI selecionada muda; reseta ao entrar em modo criação
+  useEffect(() => {
+    if (roi) {
+      setCameraId(roi.camera_id)
+      setPluginId(roi.plugin_id)
+      setName(roi.name)
+      setPolygon(roi.polygon)
+      setConfig(roi.config ?? {})
+    } else {
+      // Modo criação: reseta formulário para valores padrão
+      setCameraId(defaultCameraId ?? '')
+      setPluginId('')
+      setName('')
+      setPolygon([])
+      setConfig({})
+    }
+  }, [roi?.id, defaultCameraId])
+
+  useEffect(() => {
+    if (!cameraId) { setStreamUrl(null); setStreamReady(false); return }
+    setStreamReady(false) // Bug 5: reset ao trocar câmera
+    camerasService.streamUrls(cameraId)
+      .then((s) => {
+        setStreamUrl(s.hls_url || null)
+        setStreamReady(!!s.hls_url) // Bug 5: stream pronto quando URL existe
+      })
+      .catch(() => { setStreamUrl(null); setStreamReady(false) })
+  }, [cameraId])
 
   // Ao trocar plugin, reseta config com defaults
   useEffect(() => {
@@ -90,22 +123,24 @@ export function ROIEditorPanel({ roi, cameras, plugins, onSave, onCancel }: Prop
 
       {/* Body */}
       <div className="flex-1 overflow-y-auto p-4 space-y-4">
-        {/* Camera */}
-        <div>
-          <label className="text-xs text-t3 mb-1 block">Camera</label>
-          <select
-            value={cameraId}
-            onChange={(e) => { setCameraId(e.target.value); setPolygon([]) }}
-            disabled={isEdit}
-            className="w-full px-3 py-1.5 rounded-lg border text-sm text-t1 outline-none focus:border-accent/60 transition"
-            style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
-          >
-            <option value="">Selecione uma camera</option>
-            {cameras.map((c) => (
-              <option key={c.id} value={c.id}>{c.name}</option>
-            ))}
-          </select>
-        </div>
+        {/* Camera — hide when locked to a single camera */}
+        {cameras.length > 1 && (
+          <div>
+            <label className="text-xs text-t3 mb-1 block">Camera</label>
+            <select
+              value={cameraId}
+              onChange={(e) => { setCameraId(e.target.value); setPolygon([]) }}
+              disabled={isEdit}
+              className="w-full px-3 py-1.5 rounded-lg border text-sm text-t1 outline-none focus:border-accent/60 transition"
+              style={{ background: 'var(--surface)', borderColor: 'var(--border)' }}
+            >
+              <option value="">Selecione uma camera</option>
+              {cameras.map((c) => (
+                <option key={c.id} value={c.id}>{c.name}</option>
+              ))}
+            </select>
+          </div>
+        )}
 
         {/* Plugin */}
         <div>
@@ -137,7 +172,7 @@ export function ROIEditorPanel({ roi, cameras, plugins, onSave, onCancel }: Prop
           />
         </div>
 
-        {/* Polygon editor */}
+        {/* Polygon editor — Bug 5: skeleton loader + tools desabilitados até stream pronto */}
         {cameraId && (
           <div>
             <label className="text-xs text-t3 mb-1 block">
@@ -148,12 +183,28 @@ export function ROIEditorPanel({ roi, cameras, plugins, onSave, onCancel }: Prop
               {pluginId && !POLYGON_REQUIRED[pluginId] && (
                 <span className="text-t3 ml-1">(opcional)</span>
               )}
+              {!streamReady && POLYGON_REQUIRED[pluginId] && (
+                <span className="text-t3 ml-1 inline-flex items-center gap-1">
+                  <Loader2 size={10} className="animate-spin" />
+                  Aguardando vídeo...
+                </span>
+              )}
             </label>
-            <PolygonEditor
-              cameraId={cameraId}
-              polygon={polygon}
-              onChange={setPolygon}
-            />
+            {!streamReady ? (
+              // Bug 5: skeleton loader enquanto stream não está pronto
+              <div
+                className="w-full aspect-video rounded-lg animate-pulse"
+                style={{ background: 'var(--elevated)' }}
+              />
+            ) : (
+              <PolygonEditor
+                cameraId={cameraId}
+                polygon={polygon}
+                onChange={setPolygon}
+                streamUrl={streamUrl ?? undefined}
+                disabled={!streamReady} // Bug 5: desabilita ferramentas até carregamento
+              />
+            )}
           </div>
         )}
 

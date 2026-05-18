@@ -93,9 +93,6 @@ class RecordingId(EntityId):
     pass
 
 
-class VODStreamId(EntityId):
-    """Identificador de Stream VOD."""
-    pass
 
 
 class PluginId(EntityId):

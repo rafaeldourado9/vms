@@ -1,33 +1,29 @@
-"""Captura de snapshot de câmera — ONVIF GetSnapshotUri ou ffmpeg frame."""
+"""Captura de snapshot de câmera — ffmpeg frame capturado inline."""
 from __future__ import annotations
 
-from vms.cameras.domain import Camera, StreamProtocol
+import base64
+import logging
+
+from vms.cameras.domain import Camera
+
+logger = logging.getLogger(__name__)
 
 
 async def get_snapshot_url(camera: Camera) -> str | None:
     """
-    Retorna URL de snapshot para a câmera.
+    Captura um frame da câmera e retorna como data URL (data:image/jpeg;base64,...).
 
-    - ONVIF: usa snapshot_url extraída via GetSnapshotUri (se disponível)
-    - rtsp_pull / onvif com rtsp_url: gera URL de snapshot via proxy interno
-    - rtmp_push: retorna None (snapshot não disponível sem stream ativo)
+    Estratégia:
+    1. Tenta HLS interno do MediaMTX (funciona para qualquer câmera com stream ativo)
+    2. Para RTSP pull / ONVIF: fallback para RTSP direto
+    3. Retorna None se ffmpeg não conseguir capturar frame
     """
-    if camera.stream_protocol == StreamProtocol.ONVIF:
-        # Faz probe rápido para obter snapshot URL
-        if camera.onvif_url and camera.onvif_username:
-            from vms.cameras.onvif_client import OnvifClient
-            result = await OnvifClient.probe(
-                camera.onvif_url,
-                camera.onvif_username or "",
-                camera.onvif_password or "",
-                timeout=3.0,
-            )
-            if result.snapshot_url:
-                return result.snapshot_url
+    from vms.cameras.thumbnail import capture_thumbnail
 
-    if camera.rtsp_url:
-        # Retorna URL do endpoint interno que captura frame via ffmpeg
-        # O endpoint /streaming/snapshot/{path} é servido pelo FastAPI
-        return f"/streaming/snapshot/{camera.mediamtx_path}"
+    jpeg = await capture_thumbnail(camera)
+    if jpeg:
+        b64 = base64.b64encode(jpeg).decode()
+        return f"data:image/jpeg;base64,{b64}"
 
+    logger.debug("get_snapshot_url: sem frame para camera=%s protocol=%s", camera.id, camera.stream_protocol)
     return None

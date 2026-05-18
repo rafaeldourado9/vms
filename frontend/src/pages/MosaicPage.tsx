@@ -197,9 +197,9 @@ export function MosaicPage() {
           <div className="h-8 w-32 rounded-lg animate-pulse" style={{ background: 'var(--surface)' }} />
           <div className="ml-auto h-6 w-48 rounded animate-pulse" style={{ background: 'var(--surface)' }} />
         </div>
-        <div className={clsx('grid gap-2', GRID_CLASS[layout])} style={{ height: 'calc(100vh - 120px)' }}>
+        <div className={clsx('grid gap-2 flex-1 min-h-0', GRID_CLASS[layout])} style={{ gridTemplateRows: `repeat(${Math.sqrt(slotsCount)}, 1fr)` }}>
           {Array.from({ length: slotsCount }).map((_, i) => (
-            <div key={i} className="rounded-lg overflow-hidden bg-zinc-900 flex items-center justify-center">
+            <div key={i} className="rounded-lg overflow-hidden bg-zinc-900 flex items-center justify-center min-h-0">
               <Loader2 size={28} className="text-zinc-700 animate-spin" />
             </div>
           ))}
@@ -224,6 +224,7 @@ export function MosaicPage() {
               className={clsx(
                 'px-3 py-1 rounded-md text-xs font-medium transition',
                 layout === l.id ? 'text-white' : 'text-t2 hover:text-t1',
+                (l.id === '3x3' || l.id === '4x4') && 'hidden sm:block',
               )}
               style={layout === l.id ? { background: 'var(--accent)' } : {}}
             >
@@ -260,13 +261,10 @@ export function MosaicPage() {
         </div>
       </div>
 
-      {/* Mosaic grid - altura fixa baseada no viewport */}
+      {/* Mosaic grid — flex-1 min-h-0 fills remaining space within the full-height flex column */}
       <div
-        className={clsx('grid gap-2', GRID_CLASS[layout])}
-        style={{
-          height: 'calc(100vh - 120px)',
-          gridTemplateRows: `repeat(${Math.sqrt(slotsCount)}, 1fr)`,
-        }}
+        className={clsx('grid gap-2 flex-1 min-h-0', GRID_CLASS[layout])}
+        style={{ gridTemplateRows: `repeat(${Math.sqrt(slotsCount)}, 1fr)` }}
       >
         {slots.map((slot, idx) => (
           <div

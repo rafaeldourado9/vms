@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Brain, Calendar, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { Calendar, ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { recordingsService } from '@/services/recordings'
-import { analyticsService, type AnalyticsEvent } from '@/services/analytics'
 import { VideoPlayer } from '@/components/camera/VideoPlayer'
-import { ModernTimeline, type EventMarker } from '@/components/map/ModernTimeline'
+import { ModernTimeline } from '@/components/map/ModernTimeline'
 import { useAuthStore } from '@/store/authStore'
-import { PLUGIN_NAMES, SEV_STYLE } from '@/constants/plugins'
 import type { Camera, RecordingSegment } from '@/types'
+
+
 
 function shiftDate(iso: string, days: number): string {
   const d = new Date(iso)
@@ -18,9 +18,6 @@ function fmtTime(iso: string) {
   return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
 }
 
-function fmtTimeFull(iso: string) {
-  return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
-}
 
 interface MapTimelinePanelProps {
   camera: Camera
@@ -36,7 +33,6 @@ export function MapTimelinePanel({ camera, onClose }: MapTimelinePanelProps) {
   const [loading, setLoading]         = useState(false)
   const [playbackSeg, setPlaybackSeg] = useState<RecordingSegment | null>(null)
   const [playbackUrl, setPlaybackUrl] = useState<string | null>(null)
-  const [analyticsEvents, setAnalyticsEvents] = useState<AnalyticsEvent[]>([])
 
   // Carrega segmentos ao mudar câmera/data
   useEffect(() => {
@@ -64,25 +60,15 @@ export function MapTimelinePanel({ camera, onClose }: MapTimelinePanelProps) {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [camera.id, selDate])
 
-  // Carrega eventos analíticos
-  useEffect(() => {
-    setAnalyticsEvents([])
-    analyticsService.getEvents({
-      camera_id:      camera.id,
-      occurred_after:  new Date(selDate + 'T00:00:00').toISOString(),
-      occurred_before: new Date(selDate + 'T23:59:59.999').toISOString(),
-      limit: 500,
-    })
-      .then(setAnalyticsEvents)
-      .catch(() => {})
-  }, [camera.id, selDate])
-
   const playSeg = useCallback((seg: RecordingSegment) => {
     if (!token) return
-    const url = new URL(seg.file_path, window.location.origin)
-    url.searchParams.set('token', token)
     setPlaybackSeg(seg)
-    setPlaybackUrl(url.toString())
+    setPlaybackUrl(null)
+    recordingsService.prepareHls(seg.id).then((res) => {
+      setPlaybackUrl(`${res.hls_url}?token=${encodeURIComponent(token)}`)
+    }).catch(() => {
+      setPlaybackUrl(null)
+    })
   }, [token])
 
   const handleTimelineSeek = useCallback((time: Date) => {
@@ -93,23 +79,6 @@ export function MapTimelinePanel({ camera, onClose }: MapTimelinePanelProps) {
     })
     if (hit) playSeg(hit)
   }, [segments, playSeg])
-
-  const eventMarkers = useMemo<EventMarker[]>(() =>
-    analyticsEvents.map((ev) => ({
-      id: ev.id, time: new Date(ev.occurred_at),
-      severity: ev.severity, plugin_id: ev.plugin_id, event_type: ev.event_type,
-    })),
-    [analyticsEvents],
-  )
-
-  const segmentEvents = useMemo(() => {
-    if (!playbackSeg) return []
-    const s0 = new Date(playbackSeg.started_at).getTime()
-    const s1 = new Date(playbackSeg.ended_at).getTime()
-    return analyticsEvents
-      .filter((ev) => { const t = new Date(ev.occurred_at).getTime(); return t >= s0 && t <= s1 })
-      .sort((a, b) => new Date(a.occurred_at).getTime() - new Date(b.occurred_at).getTime())
-  }, [analyticsEvents, playbackSeg])
 
   return (
     <div
@@ -128,13 +97,6 @@ export function MapTimelinePanel({ camera, onClose }: MapTimelinePanelProps) {
         style={{ borderBottom: '1px solid rgba(255,255,255,0.06)' }}
       >
         <span className="text-sm font-semibold text-white truncate flex-1">{camera.name}</span>
-
-        {analyticsEvents.length > 0 && (
-          <span className="flex items-center gap-1 text-[10px] text-accent">
-            <Brain size={11} />
-            {analyticsEvents.length} detecções
-          </span>
-        )}
 
         {/* Date nav */}
         <div className="flex items-center gap-1 shrink-0">
@@ -206,36 +168,9 @@ export function MapTimelinePanel({ camera, onClose }: MapTimelinePanelProps) {
             onSeek={handleTimelineSeek}
             isLoading={loading}
             selectedDate={selDate}
-            eventMarkers={eventMarkers}
+            eventMarkers={[]}
           />
         </div>
-
-        {/* Analytics events strip */}
-        {segmentEvents.length > 0 && (
-          <div
-            className="flex items-center gap-1.5 px-3 pb-2 overflow-x-auto"
-            style={{ scrollbarWidth: 'none', borderTop: '1px solid rgba(255,255,255,0.05)' }}
-          >
-            <span className="text-[9px] text-zinc-600 shrink-0 flex items-center gap-1">
-              <Brain size={9} />IA:
-            </span>
-            {segmentEvents.map((ev) => {
-              const sev = SEV_STYLE[ev.severity] ?? SEV_STYLE.info
-              return (
-                <div
-                  key={ev.id}
-                  className="shrink-0 flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] border"
-                  style={{ background: sev.bg, color: sev.text, borderColor: `${sev.dot}30` }}
-                  title={ev.event_type}
-                >
-                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ background: sev.dot }} />
-                  {PLUGIN_NAMES[ev.plugin_id] ?? ev.plugin_id}
-                  <span className="opacity-60">{fmtTimeFull(ev.occurred_at)}</span>
-                </div>
-              )
-            })}
-          </div>
-        )}
       </div>
     </div>
   )

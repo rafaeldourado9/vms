@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import logging
 
-from fastapi import APIRouter, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, HTTPException, Query, Request, status
 from fastapi.responses import FileResponse
 
 from vms.shared.api.dependencies import CurrentUser, DbSession
@@ -31,6 +31,8 @@ async def request_report(
     body: CreateReportRequest,
     claims: CurrentUser,
     db: DbSession,
+    request: Request,
+    bg: BackgroundTasks,
 ) -> ReportResponse:
     """Solicita geração de relatório. Processamento assíncrono via ARQ."""
     svc = _report_svc(db)
@@ -43,15 +45,31 @@ async def request_report(
     )
 
     # Enfileirar task ARQ
+    report_id_str = str(report.id.value) if hasattr(report.id, 'value') else str(report.id)
     try:
-        arq_redis = getattr(db.get_bind().engine.pool, '_arq_redis', None) if hasattr(db.get_bind().engine, 'pool') else None
-        # Fallback: usar app.state.arq_redis via dependency injetada
-        # Para MVP: chamamos a task diretamente (em prod: enqueue_job)
-        logger.info("Task ARQ enfileirada para relatório %s (simulada)", report.id)
+        arq_pool = getattr(request.app.state, 'arq_redis', None)
+        if arq_pool and hasattr(arq_pool, 'enqueue_job'):
+            await arq_pool.enqueue_job(
+                'task_generate_report',
+                report_id_str,
+                _queue_name='arq:low',
+            )
+            logger.info("Task ARQ enfileirada para relatório %s", report_id_str)
+        else:
+            # Fallback: gerar em background task FastAPI
+            bg.add_task(_bg_generate, report_id_str)
+            logger.info("Relatório %s agendado via BackgroundTasks (ARQ indisponível)", report_id_str)
     except Exception:
-        logger.debug("ARQ indisponível, task será processada no próximo ciclo")
+        bg.add_task(_bg_generate, report_id_str)
+        logger.warning("ARQ falhou, usando BackgroundTasks para relatório %s", report_id_str)
 
     return ReportResponse.model_validate(report)
+
+
+async def _bg_generate(report_id: str) -> None:
+    """Fallback: gera relatório em background quando ARQ não disponível."""
+    from vms.reports.tasks import task_generate_report
+    await task_generate_report({}, report_id)
 
 
 @router.post(
@@ -71,7 +89,8 @@ async def generate_report_now(
         raise HTTPException(status_code=404, detail="Relatório não encontrado")
 
     data = await _collect_data(report.report_type, report.parameters, claims.tenant_id, db)
-    await svc.generate_report_pdf(report, data)
+    branding = await _fetch_branding(claims.tenant_id, db)
+    await svc.generate_report_pdf(report, data, branding=branding)
 
     return ReportResponse.model_validate(report)
 
@@ -132,7 +151,7 @@ async def list_reports(
 ) -> ReportListResponse:
     """Lista relatórios do tenant."""
     svc = _report_svc(db)
-    items, total = await svc.list_reports(claims.tenant_id, page_size=page_size, page=1)
+    items, total = await svc.list_reports(claims.tenant_id, page_size=page_size, page=page)
     return ReportListResponse.build(items, total, page, page_size)
 
 
@@ -271,3 +290,18 @@ async def _collect_data(report_type: ReportType, params: dict, tenant_id: str, d
 
     # Fallback genérico
     return {"events": [], "summary": {}, "total_events": 0}
+
+
+async def _fetch_branding(tenant_id: str, db: DbSession) -> dict:
+    """Busca dados de branding do tenant para incluir nos PDFs."""
+    from sqlalchemy import select
+    from vms.iam.models import TenantModel
+    tenant = await db.scalar(select(TenantModel).where(TenantModel.id == tenant_id))
+    if not tenant:
+        return {}
+    return {
+        "company_name": tenant.company_name,
+        "cnpj": tenant.cnpj,
+        "company_address": tenant.company_address,
+        "logo_url": tenant.logo_url,
+    }

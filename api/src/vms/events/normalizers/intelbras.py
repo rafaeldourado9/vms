@@ -79,8 +79,9 @@ class IntelbrasNormalizer:
 
     def can_handle(self, raw: dict) -> bool:
         """Detecta payload Intelbras com leitura de placa."""
-        # Formato 4: ITSCAM ANPR — JPEG com placa embutida no binário
-        if raw.get("Picture", {}).get("NormalPic", {}).get("Content"):
+        # Formato 4: ITSCAM /NotificationInfo/TollgateInfo — Picture com Plate e/ou NormalPic
+        pic = raw.get("Picture")
+        if isinstance(pic, dict) and ("Plate" in pic or "NormalPic" in pic):
             return True
         # Formato 1: campo 'placa' (PT)
         if "placa" in raw:
@@ -105,22 +106,55 @@ class IntelbrasNormalizer:
         timestamp = datetime.utcnow()
         image_b64 = None
 
-        # Formato 4: ITSCAM ANPR — extrai placa do JPEG
-        content = raw.get("Picture", {}).get("NormalPic", {}).get("Content", "")
-        if content:
-            image_b64 = content
-            try:
-                raw_bytes = base64.b64decode(content)
-                plate = _extract_itscam_plate(raw_bytes) or ""
-                # Extrai timestamp do JPEG (primeiros bytes ASCII contêm data)
-                ts_matches = re.findall(rb'\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}', raw_bytes[:512])
-                if ts_matches:
-                    timestamp = _parse_intelbras_datetime(ts_matches[0].decode())
-            except Exception as exc:
-                logger.debug("Erro ao extrair dados do JPEG ITSCAM: %s", exc)
+        # Formato 4: ITSCAM /NotificationInfo/TollgateInfo
+        pic = raw.get("Picture")
+        if isinstance(pic, dict) and ("Plate" in pic or "NormalPic" in pic):
+            plate_info = pic.get("Plate", {}) if isinstance(pic.get("Plate"), dict) else {}
+            snap_info = pic.get("SnapInfo", {}) if isinstance(pic.get("SnapInfo"), dict) else {}
+            normal_pic = pic.get("NormalPic", {}) if isinstance(pic.get("NormalPic"), dict) else {}
+
+            # Placa via JSON estruturado (mais confiável que extração JPEG)
+            plate = str(plate_info.get("PlateNumber") or "").upper().strip()
+
+            # Fallback: extrai placa do JPEG se o campo JSON estiver vazio
+            content = normal_pic.get("Content", "")
+            if content:
+                image_b64 = content
+                if not plate:
+                    try:
+                        raw_bytes = base64.b64decode(content)
+                        plate = _extract_itscam_plate(raw_bytes) or ""
+                    except Exception as exc:
+                        logger.debug("Erro ao extrair placa do JPEG ITSCAM: %s", exc)
+
+            logger.info("ITSCAM frame | plate=%r pic_name=%s", plate, normal_pic.get("PicName", ""))
 
             if not plate:
                 return None  # Frame sem placa detectada — ignorar
+
+            confidence = _norm_confidence(plate_info.get("Confidence", 0))
+
+            # Timestamp do SnapInfo (mais preciso que o JPEG)
+            snap_time = snap_info.get("AccurateTime") or snap_info.get("SnapTime") or ""
+            if snap_time:
+                timestamp = _parse_intelbras_datetime(snap_time)
+
+            # Extrai metadados de veículo de Picture.Plate antes de descartar o Picture
+            # (o JPEG em NormalPic.Content é grande demais para salvar no DB)
+            vehicle_meta: dict = {}
+            _vehicle_field_map = [
+                ("VehicleColor", "vehicle_color"),
+                ("VehicleType",  "vehicle_type"),
+                ("VehicleBrand", "vehicle_brand"),
+                ("VehicleModel", "vehicle_model"),
+                ("Speed",        "vehicle_speed"),
+                ("Direction",    "direction"),
+                ("Color",        "plate_color"),
+            ]
+            for src, dst in _vehicle_field_map:
+                val = plate_info.get(src)
+                if val not in (None, "", 0):
+                    vehicle_meta[dst] = val
 
             return AlprDetection(
                 camera_id=camera_id,
@@ -129,7 +163,10 @@ class IntelbrasNormalizer:
                 confidence=confidence,
                 manufacturer=self.manufacturer,
                 timestamp=timestamp,
-                raw_payload={k: v for k, v in raw.items() if k != "Picture"},  # não salva JPEG no DB
+                raw_payload={
+                    **{k: v for k, v in raw.items() if k != "Picture"},
+                    **vehicle_meta,
+                },
                 image_b64=image_b64,
             )
 
@@ -141,22 +178,13 @@ class IntelbrasNormalizer:
             if not plate:
                 logger.debug("Intelbras normalizer: placa vazia, ignorando evento")
                 return None
-            conf_raw = ev.get("Confidence", 0)
-            try:
-                confidence = float(conf_raw) / (100.0 if float(conf_raw) > 1 else 1.0)
-            except (ValueError, TypeError):
-                confidence = 0.0
+            confidence = _norm_confidence(ev.get("Confidence", 0))
             timestamp = _parse_intelbras_datetime(raw.get("DateTime", ""))
 
         # Formato 1 (PT) e Formato 2 (EN)
         if not plate:
             plate = str(raw.get("placa") or raw.get("plate") or "").upper().strip()
-            conf_raw = raw.get("confianca") or raw.get("confidence") or 0
-            try:
-                raw_f = float(conf_raw)
-                confidence = raw_f / 100.0 if raw_f > 1.0 else raw_f
-            except (ValueError, TypeError):
-                confidence = 0.0
+            confidence = _norm_confidence(raw.get("confianca") or raw.get("confidence") or 0)
             timestamp = _parse_intelbras_datetime(
                 raw.get("timestamp") or raw.get("dateTime") or ""
             )
@@ -172,6 +200,26 @@ class IntelbrasNormalizer:
             raw_payload=raw,
             image_b64=image_b64,
         )
+
+
+def _norm_confidence(raw_value: object) -> float:
+    """
+    Normaliza confiança para o intervalo [0.0, 1.0].
+
+    Câmeras Intelbras/Dahua podem enviar:
+    - 0.92   → já normalizado (0–1)
+    - 92     → percentual (0–100)
+    - 118    → escala proprietária (0–127 em alguns firmwares) — clampeia em 1.0
+
+    Regra: se o valor for > 1, divide por 100. Depois clampeia em [0.0, 1.0].
+    """
+    try:
+        v = float(raw_value)  # type: ignore[arg-type]
+    except (ValueError, TypeError):
+        return 0.0
+    if v > 1.0:
+        v = v / 100.0
+    return max(0.0, min(1.0, v))
 
 
 def _parse_intelbras_datetime(value: str) -> datetime:

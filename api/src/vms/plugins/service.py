@@ -63,6 +63,7 @@ class PluginService:
         confidence: float | None,
         occurred_at: datetime | None,
         payload: dict,
+        snapshot_path: str | None = None,
     ) -> str:
         """
         Persiste evento enviado pelo plugin e publica no event bus.
@@ -78,12 +79,26 @@ class PluginService:
         if confidence is not None:
             enriched_payload["confidence"] = confidence
 
+        # Se houver imagem base64 no payload, salvar em disco
+        image_path = snapshot_path
+        if not image_path:
+            image_b64 = payload.get("image_b64") or payload.get("imagem")
+            if image_b64:
+                from vms.events.images import save_event_image
+                image_path = save_event_image(
+                    tenant_id=tenant_id,
+                    event_id=event_id,
+                    image_b64=image_b64,
+                    occurred_at=timestamp,
+                )
+
         event = VmsEventModel(
             id=event_id,
             tenant_id=tenant_id,
             camera_id=camera_id,
             event_type=event_type,
             payload=enriched_payload,
+            image_path=image_path,
             occurred_at=timestamp,
         )
         db.add(event)

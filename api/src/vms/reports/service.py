@@ -50,7 +50,7 @@ class ReportService:
         )
         return await self._repo.create(report)
 
-    async def generate_report_pdf(self, report: Report, data: dict) -> Report:
+    async def generate_report_pdf(self, report: Report, data: dict, branding: dict | None = None) -> Report:
         """
         Gera o PDF do relatório.
 
@@ -79,6 +79,7 @@ class ReportService:
             context = {
                 "title": self._get_report_title(report.report_type),
                 "params": report.parameters,
+                "branding": branding or {},
                 **data,
             }
             html = render_template(template_name, context)

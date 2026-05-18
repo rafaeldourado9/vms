@@ -78,6 +78,7 @@ class AnalyticsEventResponse(BaseModel):
     payload: dict
     occurred_at: datetime
     created_at: datetime
+    snapshot_url: str | None = None
 
 
 class AnalyticsStatsResponse(BaseModel):
@@ -93,53 +94,9 @@ class AnalyticsStatsResponse(BaseModel):
 
 CATALOG = [
     PluginCatalogItem(
-        id="fire_smoke",
-        name="Fire & Smoke Detection",
-        description="Detecta incêndios e fumaça em tempo real. Ideal para áreas de risco, florestas e indústrias.",
-        version="1.0.0",
-        category="safety",
-        model_size="49.7 MB",
-        fps_cost=2,
-        is_available=True,
-        classes=["Fire", "Smoke"],
-    ),
-    PluginCatalogItem(
-        id="ppe_detection",
-        name="PPE Detection (EPIs)",
-        description="Detecta uso de equipamentos de proteção: capacetes, coletes. Essencial para canteiros de obras.",
-        version="1.0.0",
-        category="safety",
-        model_size="6.0 MB",
-        fps_cost=3,
-        is_available=True,
-        classes=["No Hard Hat", "Hard Hat", "NO-Safety Vest", "Safety Vest"],
-    ),
-    PluginCatalogItem(
-        id="biker_detection",
-        name="Biker Helmet Detection",
-        description="Identifica motociclistas com e sem capacete. Útil para fiscalização de trânsito.",
-        version="1.0.0",
-        category="traffic",
-        model_size="6.0 MB",
-        fps_cost=2,
-        is_available=True,
-        classes=["WO_Helmet", "W_Helmet", "biker"],
-    ),
-    PluginCatalogItem(
-        id="horse_cart",
-        name="Horse & Cart Detection",
-        description="Detecta cavalos e carroças. Aplicações em zonas rurais e monitoramento animal.",
-        version="1.0.0",
-        category="custom",
-        model_size="49.6 MB",
-        fps_cost=2,
-        is_available=True,
-        classes=["horse", "cart"],
-    ),
-    PluginCatalogItem(
         id="intrusion",
-        name="Intrusion Detection",
-        description="Detecta intrusão em zonas definidas. Perímetro, áreas restritas.",
+        name="Cerca Virtual",
+        description="Detecta quando pessoas ou veículos cruzam uma linha ou perímetro definido. Ideal para cercas virtuais e controle de acesso.",
         version="1.0.0",
         category="security",
         model_size="3.2 MB",
@@ -149,36 +106,14 @@ CATALOG = [
     ),
     PluginCatalogItem(
         id="people_count",
-        name="People Counting",
-        description="Contagem de pessoas em tempo real. Controle de lotação, heatmaps.",
+        name="Contagem de Pessoas",
+        description="Contagem de pessoas em tempo real. Controle de lotação, heatmaps e fluxo de pedestres.",
         version="1.0.0",
         category="traffic",
         model_size="3.2 MB",
         fps_cost=1,
         is_available=True,
         classes=["person"],
-    ),
-    PluginCatalogItem(
-        id="vehicle_count",
-        name="Vehicle Counting",
-        description="Contagem de veículos por tipo. Estatísticas de tráfego.",
-        version="1.0.0",
-        category="traffic",
-        model_size="3.2 MB",
-        fps_cost=1,
-        is_available=True,
-        classes=["car", "bus", "truck", "motorcycle", "bicycle"],
-    ),
-    PluginCatalogItem(
-        id="lpr",
-        name="License Plate Recognition",
-        description="Reconhecimento de placas de veículos (LPR/ALPR). Controle de acesso veicular.",
-        version="1.0.0",
-        category="security",
-        model_size="6.2 MB",
-        fps_cost=4,
-        is_available=True,
-        classes=["license_plate"],
     ),
 ]
 
@@ -401,9 +336,41 @@ async def list_events(
             payload=e.payload,
             occurred_at=e.occurred_at,
             created_at=e.created_at,
+            snapshot_url=f"/api/v1/analytics/events/{e.id}/snapshot" if e.snapshot_path else None,
         )
         for e in events
     ]
+
+
+@router.get("/events/{event_id}/snapshot", include_in_schema=False)
+async def get_event_snapshot(
+    event_id: uuid.UUID,
+    db: DbSession,
+    current_user: CurrentUser,
+) -> "Response":
+    """Serve snapshot JPEG de um evento de analytics (autenticado via Bearer token)."""
+    import os
+    from fastapi import Response
+    from fastapi.responses import FileResponse
+    from sqlalchemy import select
+    from vms.analytics.models import AnalyticsEvent
+
+    tenant_id = _get_tenant_id(current_user)
+    stmt = select(AnalyticsEvent).where(
+        AnalyticsEvent.id == event_id,
+        AnalyticsEvent.tenant_id == tenant_id,
+    )
+    result = await db.execute(stmt)
+    event = result.scalar_one_or_none()
+
+    if not event or not event.snapshot_path:
+        raise HTTPException(status_code=404, detail="Snapshot não encontrado")
+
+    full_path = f"/snapshots/{event.snapshot_path}"
+    if not os.path.isfile(full_path):
+        raise HTTPException(status_code=404, detail="Arquivo de snapshot não encontrado")
+
+    return FileResponse(full_path, media_type="image/jpeg")
 
 
 # ─── Dashboard / Estatísticas ─────────────────────────────────────────────────
@@ -470,9 +437,18 @@ async def create_roi(
     db: DbSession,
     current_user: CurrentUser,
 ) -> ROIResponse:
-    """Cria uma ROI (zona de detecção) para uma câmera."""
-    from vms.analytics.models import AnalyticsROI
+    """Cria uma ROI (zona de detecção) para uma câmera.
+
+    Também garante que haja uma PluginInstallation ativa para o plugin,
+    para que o analytics service comece a processar esta câmera.
+    """
+    from vms.analytics.models import AnalyticsROI, PluginInstallation
+    from vms.plugins import roi_cache
+    from sqlalchemy import select
+
     tenant_id = _get_tenant_id(current_user)
+
+    # Criar ROI
     roi = AnalyticsROI(
         tenant_id=tenant_id,
         camera_id=body.camera_id,
@@ -483,6 +459,31 @@ async def create_roi(
     )
     db.add(roi)
     await db.flush()
+
+    # Garantir que existe uma PluginInstallation ativa para este plugin
+    install_stmt = select(PluginInstallation).where(
+        PluginInstallation.tenant_id == tenant_id,
+        PluginInstallation.plugin_id == body.plugin_id,
+    )
+    install_result = await db.execute(install_stmt)
+    existing = install_result.scalar_one_or_none()
+
+    plugin_info = CATALOG_MAP.get(body.plugin_id)
+    if not existing:
+        installation = PluginInstallation(
+            tenant_id=tenant_id,
+            plugin_id=body.plugin_id,
+            plugin_name=plugin_info.name if plugin_info else body.plugin_id,
+            edge_agent_id="default",
+            status="running",
+        )
+        db.add(installation)
+        await db.flush()
+    elif existing.status != "running":
+        existing.status = "running"
+        await db.flush()
+
+    roi_cache.invalidate(str(tenant_id), body.camera_id)
     return ROIResponse(
         id=str(roi.id),
         camera_id=roi.camera_id,
@@ -505,6 +506,8 @@ async def update_roi(
     """Atualiza uma ROI existente."""
     from sqlalchemy import select
     from vms.analytics.models import AnalyticsROI
+    from vms.plugins import roi_cache
+
     tenant_id = _get_tenant_id(current_user)
     result = await db.execute(
         select(AnalyticsROI).where(
@@ -521,6 +524,7 @@ async def update_roi(
     roi.polygon = body.polygon
     roi.config = body.config
     await db.flush()
+    roi_cache.invalidate(str(tenant_id), body.camera_id)
     return ROIResponse(
         id=str(roi.id),
         camera_id=roi.camera_id,
@@ -542,6 +546,8 @@ async def delete_roi(
     """Remove uma ROI."""
     from sqlalchemy import select
     from vms.analytics.models import AnalyticsROI
+    from vms.plugins import roi_cache
+
     tenant_id = _get_tenant_id(current_user)
     result = await db.execute(
         select(AnalyticsROI).where(
@@ -552,6 +558,7 @@ async def delete_roi(
     roi = result.scalar_one_or_none()
     if not roi:
         raise HTTPException(status_code=404, detail="ROI não encontrada")
+    roi_cache.invalidate(str(tenant_id), roi.camera_id)
     await db.delete(roi)
 
 

@@ -19,7 +19,7 @@ class ReportModel(Base):
     )
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    tenant_id = Column(UUID(as_uuid=True), nullable=False)
+    tenant_id = Column(UUID(as_uuid=False), nullable=False)
     report_type = Column(String(50), nullable=False)
     parameters = Column(JSONB, nullable=False, server_default=text("'{}'"))
     status = Column(String(20), nullable=False, server_default=text("'pending'"))

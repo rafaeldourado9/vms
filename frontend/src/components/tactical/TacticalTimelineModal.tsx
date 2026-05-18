@@ -1,27 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { Brain, ChevronLeft, ChevronRight, X } from 'lucide-react'
+import { useCallback, useEffect, useState } from 'react'
+import { ChevronLeft, ChevronRight, X } from 'lucide-react'
 import { recordingsService } from '@/services/recordings'
-import { analyticsService, type AnalyticsEvent } from '@/services/analytics'
-import { VideoPlayer } from '@/components/camera/VideoPlayer'
-import { ModernTimeline, type EventMarker } from '@/components/map/ModernTimeline'
+import { RecordingPlayer } from '@/components/camera/RecordingPlayer'
+import { DayProgressTimeline, type DayInterval } from '@/components/camera/DayProgressTimeline'
 import { useAuthStore } from '@/store/authStore'
-import { PLUGIN_NAMES, SEV_STYLE } from '@/constants/plugins'
-import type { Camera, RecordingSegment } from '@/types'
+import type { Camera } from '@/types'
 
 function shiftDate(iso: string, days: number): string {
   const d = new Date(iso)
   d.setDate(d.getDate() + days)
   return d.toISOString().split('T')[0]
-}
-
-function fmtTime(iso: string) {
-  return new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
-}
-
-function fmtTimeFull(iso: string) {
-  return new Date(iso).toLocaleTimeString('pt-BR', {
-    hour: '2-digit', minute: '2-digit', second: '2-digit',
-  })
 }
 
 function fmtDateShort(iso: string) {
@@ -39,12 +27,16 @@ export function TacticalTimelineModal({ camera, onClose }: Props) {
   const token = useAuthStore((s) => s.tokens?.access_token ?? '')
   const today = new Date().toISOString().split('T')[0]
 
-  const [selDate, setSelDate]         = useState(today)
-  const [segments, setSegments]       = useState<RecordingSegment[]>([])
-  const [loading, setLoading]         = useState(false)
-  const [playbackSeg, setPlaybackSeg] = useState<RecordingSegment | null>(null)
-  const [playbackUrl, setPlaybackUrl] = useState<string | null>(null)
-  const [analyticsEvents, setAnalyticsEvents] = useState<AnalyticsEvent[]>([])
+  const [selDate, setSelDate] = useState(today)
+  const [loading, setLoading] = useState(false)
+  const [hlsUrl, setHlsUrl] = useState<string | null>(null)
+  const [windowStartMs, setWindowStartMs] = useState(0)
+  const [windowEndMs, setWindowEndMs] = useState(0)
+  const [intervals, setIntervals] = useState<DayInterval[]>([])
+  const [playheadMs, setPlayheadMs] = useState(Date.now())
+  const [seekToMs, setSeekToMs] = useState<number | undefined>(undefined)
+  const [playing, setPlaying] = useState(false)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() }
@@ -58,71 +50,44 @@ export function TacticalTimelineModal({ camera, onClose }: Props) {
   }, [])
 
   useEffect(() => {
-    setLoading(true)
-    setPlaybackUrl(null)
-    setPlaybackSeg(null)
-    setSegments([])
-
-    recordingsService
-      .listSegments({
-        camera_id:      camera.id,
-        started_after:  new Date(selDate + 'T00:00:00').toISOString(),
-        started_before: new Date(selDate + 'T23:59:59.999').toISOString(),
-        page_size: 500,
-      })
-      .then((res) => {
-        const sorted = (res.items ?? []).slice().sort(
-          (a, b) => new Date(a.started_at).getTime() - new Date(b.started_at).getTime(),
-        )
-        setSegments(sorted)
-        if (sorted.length > 0) playSeg(sorted[sorted.length - 1])
-      })
-      .catch(() => setSegments([]))
-      .finally(() => setLoading(false))
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [camera.id, selDate])
-
-  useEffect(() => {
-    setAnalyticsEvents([])
-    analyticsService.getEvents({
-      camera_id:       camera.id,
-      occurred_after:  new Date(selDate + 'T00:00:00').toISOString(),
-      occurred_before: new Date(selDate + 'T23:59:59.999').toISOString(),
-      limit: 500,
-    }).then(setAnalyticsEvents).catch(() => {})
-  }, [camera.id, selDate])
-
-  const playSeg = useCallback((seg: RecordingSegment) => {
     if (!token) return
-    const url = new URL(seg.file_path, window.location.origin)
-    url.searchParams.set('token', token)
-    setPlaybackSeg(seg)
-    setPlaybackUrl(url.toString())
-  }, [token])
+    setLoading(true)
+    setError(null)
+    setHlsUrl(null)
 
-  const handleSeek = useCallback((time: Date) => {
-    const hit = segments.find((s) => {
-      const s0 = new Date(s.started_at).getTime()
-      const s1 = new Date(s.ended_at).getTime()
-      return time.getTime() >= s0 && time.getTime() <= s1
-    })
-    if (hit) playSeg(hit)
-  }, [segments, playSeg])
+    recordingsService.getDayHls(camera.id, selDate)
+      .then((res) => {
+        const startMs = new Date(res.started_at).getTime()
+        const endMs = new Date(res.ended_at).getTime()
+        setWindowStartMs(startMs)
+        setWindowEndMs(endMs)
+        setIntervals(res.intervals)
+        const sep = res.hls_url.includes('?') ? '&' : '?'
+        setHlsUrl(`${res.hls_url}${sep}token=${encodeURIComponent(token)}`)
+        setPlayheadMs(endMs)
+        setSeekToMs(endMs)
+      })
+      .catch((err) => {
+        setError(err?.response?.data?.detail ?? 'Sem gravações nesta data')
+        setIntervals([])
+        setWindowStartMs(0)
+        setWindowEndMs(0)
+      })
+      .finally(() => setLoading(false))
+  }, [camera.id, selDate, token])
 
-  const eventMarkers = useMemo<EventMarker[]>(() =>
-    analyticsEvents.map((ev) => ({
-      id: ev.id, time: new Date(ev.occurred_at),
-      severity: ev.severity, plugin_id: ev.plugin_id, event_type: ev.event_type,
-    })), [analyticsEvents])
+  const handleSeek = useCallback((ms: number) => {
+    setPlayheadMs(ms)
+    setSeekToMs(ms)
+  }, [])
 
-  const segmentEvents = useMemo(() => {
-    if (!playbackSeg) return []
-    const s0 = new Date(playbackSeg.started_at).getTime()
-    const s1 = new Date(playbackSeg.ended_at).getTime()
-    return analyticsEvents
-      .filter((ev) => { const t = new Date(ev.occurred_at).getTime(); return t >= s0 && t <= s1 })
-      .sort((a, b) => new Date(a.occurred_at).getTime() - new Date(b.occurred_at).getTime())
-  }, [analyticsEvents, playbackSeg])
+  const handleTogglePlay = useCallback(() => {
+    const video = document.querySelector<HTMLVideoElement>('.tactical-modal-video video')
+    if (!video) return
+    if (video.paused) video.play().catch(() => {})
+    else video.pause()
+    setPlaying(!video.paused)
+  }, [])
 
   return (
     <div
@@ -149,7 +114,6 @@ export function TacticalTimelineModal({ camera, onClose }: Props) {
             borderBottom: '1px solid rgba(255,255,255,0.05)',
           }}
         >
-          {/* Camera name */}
           <span className="text-[13px] font-medium text-white/90 truncate flex-1 tracking-tight">
             {camera.name}
           </span>
@@ -160,14 +124,6 @@ export function TacticalTimelineModal({ camera, onClose }: Props) {
             </span>
           )}
 
-          {analyticsEvents.length > 0 && (
-            <span className="flex items-center gap-1.5 text-[11px]" style={{ color: '#60a5fa' }}>
-              <Brain size={11} strokeWidth={1.5} />
-              <span className="tabular-nums">{analyticsEvents.length}</span>
-            </span>
-          )}
-
-          {/* Date nav */}
           <div className="flex items-center gap-0.5">
             <button
               onClick={() => setSelDate((d) => shiftDate(d, -1))}
@@ -207,7 +163,6 @@ export function TacticalTimelineModal({ camera, onClose }: Props) {
             </button>
           </div>
 
-          {/* Close */}
           <button
             onClick={onClose}
             className="w-7 h-7 flex items-center justify-center rounded-md transition-colors"
@@ -220,7 +175,7 @@ export function TacticalTimelineModal({ camera, onClose }: Props) {
         </div>
 
         {/* ── Video ──────────────────────────────────────────────────── */}
-        <div className="flex-1 min-h-0 bg-black relative">
+        <div className="flex-1 min-h-0 bg-black relative tactical-modal-video">
           {loading ? (
             <div className="absolute inset-0 flex items-center justify-center">
               <div
@@ -228,20 +183,22 @@ export function TacticalTimelineModal({ camera, onClose }: Props) {
                 style={{ borderWidth: 1.5 }}
               />
             </div>
-          ) : playbackUrl && playbackSeg ? (
-            <VideoPlayer
-              src={playbackUrl}
-              name={`${fmtTime(playbackSeg.started_at)} — ${fmtTime(playbackSeg.ended_at)}`}
-              className="w-full h-full object-contain"
-              muted={false}
-              autoPlay
+          ) : hlsUrl ? (
+            <RecordingPlayer
+              hlsUrl={hlsUrl}
+              windowStartMs={windowStartMs}
+              seekToMs={seekToMs}
+              className="w-full h-full"
+              onReady={() => { setLoading(false); setPlaying(true) }}
+              onError={(msg) => setError(msg)}
+              onTimeUpdate={(ms) => setPlayheadMs(ms)}
             />
           ) : (
             <div
               className="absolute inset-0 flex items-center justify-center text-[13px]"
               style={{ color: '#2a2a2a' }}
             >
-              {segments.length === 0 ? 'Sem gravações nesta data' : 'Selecione um segmento'}
+              {error ?? 'Sem gravações nesta data'}
             </div>
           )}
         </div>
@@ -251,63 +208,30 @@ export function TacticalTimelineModal({ camera, onClose }: Props) {
           className="shrink-0"
           style={{ borderTop: '1px solid rgba(255,255,255,0.04)', background: '#0a0a0a' }}
         >
-          {/* Timeline scrubber */}
-          <div className="px-5 pt-4 pb-2">
-            <ModernTimeline
-              segments={segments}
-              currentTime={playbackSeg ? new Date(playbackSeg.started_at) : new Date()}
-              onSeek={handleSeek}
-              isLoading={loading}
-              selectedDate={selDate}
-              eventMarkers={eventMarkers}
-            />
+          <div className="px-5 pt-4 pb-4">
+            {windowEndMs > windowStartMs ? (
+              <DayProgressTimeline
+                windowStartMs={windowStartMs}
+                windowEndMs={windowEndMs}
+                currentMs={playheadMs}
+                onSeek={handleSeek}
+                playing={playing}
+                onTogglePlay={handleTogglePlay}
+                intervals={intervals}
+              />
+            ) : (
+              <div style={{
+                height: 80,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'rgba(255,255,255,0.25)',
+                fontSize: 12,
+              }}>
+                {loading ? 'Carregando gravações…' : 'Sem gravações neste dia.'}
+              </div>
+            )}
           </div>
-
-          {/* Analytics events */}
-          {segmentEvents.length > 0 && (
-            <div
-              className="flex items-center gap-1 px-5 pb-3 overflow-x-auto"
-              style={{
-                scrollbarWidth: 'none',
-                borderTop: '1px solid rgba(255,255,255,0.04)',
-                paddingTop: 8,
-              }}
-            >
-              <span
-                className="flex items-center gap-1 shrink-0 mr-1"
-                style={{ color: '#2a2a2a', fontSize: 10 }}
-              >
-                <Brain size={9} strokeWidth={1.5} />
-              </span>
-              {segmentEvents.map((ev) => {
-                const sev = SEV_STYLE[ev.severity] ?? SEV_STYLE.info
-                return (
-                  <div
-                    key={ev.id}
-                    className="shrink-0 flex items-center gap-1 rounded text-[10px]"
-                    style={{
-                      padding: '2px 6px',
-                      background: sev.bg,
-                      color: sev.text,
-                      border: `1px solid ${sev.dot}20`,
-                    }}
-                    title={ev.event_type}
-                  >
-                    <span
-                      className="w-1 h-1 rounded-full shrink-0"
-                      style={{ background: sev.dot }}
-                    />
-                    <span className="font-medium">
-                      {PLUGIN_NAMES[ev.plugin_id] ?? ev.plugin_id}
-                    </span>
-                    <span className="tabular-nums" style={{ opacity: 0.55 }}>
-                      {fmtTimeFull(ev.occurred_at)}
-                    </span>
-                  </div>
-                )
-              })}
-            </div>
-          )}
         </div>
       </div>
     </div>

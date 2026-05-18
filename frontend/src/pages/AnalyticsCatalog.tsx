@@ -1,29 +1,20 @@
 import { useEffect, useState } from 'react'
 import {
-  Brain, Cpu, Activity, ShieldAlert, Flame, HardHat,
-  Bike, Car, Users, Scan, BarChart3, ChevronRight,
+  ShieldAlert, Users, BarChart3, ChevronRight, Activity, Cpu, Brain,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { Link } from 'react-router-dom'
 import { analyticsService, type AnalyticsCatalogItem, type AnalyticsStats } from '@/services/analytics'
 
 const PLUGIN_ICONS: Record<string, React.ElementType> = {
-  fire_smoke:     Flame,
-  ppe_detection:  HardHat,
-  biker_detection: Bike,
-  horse_cart:     Car,
-  intrusion:      ShieldAlert,
-  people_count:   Users,
-  vehicle_count:  Car,
-  lpr:            Scan,
+  intrusion:    ShieldAlert,
+  people_count: Users,
 }
 
 const CATEGORY_FILTERS = [
   { id: 'all', label: 'Todos' },
-  { id: 'safety', label: 'Segurança' },
-  { id: 'traffic', label: 'Tráfego' },
   { id: 'security', label: 'Patrimonial' },
-  { id: 'custom', label: 'Customizado' },
+  { id: 'traffic', label: 'Tráfego' },
 ] as const
 
 export function AnalyticsCatalog() {

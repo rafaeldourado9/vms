@@ -1,0 +1,18 @@
+{
+  "version": 2,
+  "skills": {
+    "react-native-expert": {
+      "name": "react-native-expert",
+      "source": "local",
+      "contentHash": "9da108258c0a93cd04b57d94a5a7788e6c37c704ca4322ca9b6bedce8e3ff683",
+      "installedAt": "2026-04-30T23:59:12.792Z",
+      "updatedAt": "2026-04-30T23:59:12.809Z",
+      "agents": [
+        "cursor",
+        "claude-code"
+      ],
+      "method": "copy",
+      "global": false
+    }
+  }
+}

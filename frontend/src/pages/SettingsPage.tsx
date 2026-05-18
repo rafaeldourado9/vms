@@ -1,6 +1,7 @@
-import { useState, useRef } from 'react'
-import { Save, Palette, Upload } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { Save, Palette, Upload, Building2 } from 'lucide-react'
 import { useThemeStore } from '@/store/themeStore'
+import { api } from '@/services/api'
 import toast from 'react-hot-toast'
 
 const ACCENT_PRESETS = [
@@ -14,6 +15,13 @@ const ACCENT_PRESETS = [
   { label: 'Amarelo', color: '#EAB308' },
 ]
 
+interface Branding {
+  company_name: string
+  cnpj: string
+  company_address: string
+  logo_url: string
+}
+
 export function SettingsPage() {
   const { accentColor, systemName, logoUrl, setTheme } = useThemeStore()
 
@@ -22,6 +30,37 @@ export function SettingsPage() {
   const [logo, setLogo]         = useState(logoUrl ?? '')
   const [saving, setSaving]     = useState(false)
   const fileInputRef            = useRef<HTMLInputElement>(null)
+
+  const [branding, setBranding]         = useState<Branding>({ company_name: '', cnpj: '', company_address: '', logo_url: '' })
+  const [savingBranding, setSavingBranding] = useState(false)
+
+  useEffect(() => {
+    api.get('/iam/branding')
+      .then(({ data }) => setBranding({
+        company_name:    data.company_name    ?? '',
+        cnpj:            data.cnpj            ?? '',
+        company_address: data.company_address ?? '',
+        logo_url:        data.logo_url        ?? '',
+      }))
+      .catch(() => {})
+  }, [])
+
+  const handleSaveBranding = async () => {
+    setSavingBranding(true)
+    try {
+      await api.patch('/iam/branding', {
+        company_name:    branding.company_name    || null,
+        cnpj:            branding.cnpj            || null,
+        company_address: branding.company_address || null,
+        logo_url:        branding.logo_url        || null,
+      })
+      toast.success('Dados da empresa salvos')
+    } catch {
+      toast.error('Erro ao salvar dados da empresa')
+    } finally {
+      setSavingBranding(false)
+    }
+  }
 
   const handleLogoFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0]
@@ -170,8 +209,68 @@ export function SettingsPage() {
         onClick={handleSave}
         disabled={saving}
       >
-        <Save size={16} />{saving ? 'Salvando...' : 'Salvar Configurações'}
+        <Save size={16} />{saving ? 'Salvando...' : 'Salvar Aparência'}
       </button>
+
+      {/* Dados da empresa — aparecem nos PDFs de relatório */}
+      <div>
+        <p className="text-sm font-semibold text-t1 mb-1 flex items-center gap-2">
+          <Building2 size={16} />Dados da Empresa (PDF)
+        </p>
+        <p className="text-xs text-t3">Estas informações aparecem no cabeçalho e rodapé dos relatórios em PDF</p>
+      </div>
+
+      <div className="card p-5 space-y-4">
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="label">Nome da Empresa</label>
+            <input
+              className="input"
+              value={branding.company_name}
+              onChange={(e) => setBranding((b) => ({ ...b, company_name: e.target.value }))}
+              placeholder="Empresa de Segurança Ltda"
+            />
+          </div>
+          <div>
+            <label className="label">CNPJ</label>
+            <input
+              className="input font-mono"
+              value={branding.cnpj}
+              onChange={(e) => setBranding((b) => ({ ...b, cnpj: e.target.value }))}
+              placeholder="00.000.000/0001-00"
+            />
+          </div>
+        </div>
+
+        <div>
+          <label className="label">Endereço</label>
+          <input
+            className="input"
+            value={branding.company_address}
+            onChange={(e) => setBranding((b) => ({ ...b, company_address: e.target.value }))}
+            placeholder="Rua Exemplo, 123 — São Paulo, SP"
+          />
+        </div>
+
+        <div>
+          <label className="label">URL do Logo (para PDFs)</label>
+          <input
+            className="input"
+            value={branding.logo_url}
+            onChange={(e) => setBranding((b) => ({ ...b, logo_url: e.target.value }))}
+            placeholder="https://exemplo.com/logo.png"
+          />
+          <p className="text-xs text-t3 mt-1">Use uma URL pública acessível pelo servidor de relatórios</p>
+        </div>
+
+        <button
+          className="btn btn-primary gap-2"
+          onClick={handleSaveBranding}
+          disabled={savingBranding}
+        >
+          <Save size={16} />{savingBranding ? 'Salvando...' : 'Salvar Dados da Empresa'}
+        </button>
+      </div>
     </div>
   )
 }

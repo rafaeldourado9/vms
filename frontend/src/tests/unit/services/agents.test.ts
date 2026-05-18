@@ -29,7 +29,7 @@ describe('agentsService', () => {
 
       const result = await agentsService.list()
 
-      expect(api.get).toHaveBeenCalledWith('/api/v1/agents')
+      expect(api.get).toHaveBeenCalledWith('/agents')
       expect(result).toHaveLength(2)
       expect(result[0].name).toBe('agent-01')
     })
@@ -48,7 +48,7 @@ describe('agentsService', () => {
 
       const result = await agentsService.create('new-agent')
 
-      expect(api.post).toHaveBeenCalledWith('/api/v1/agents', { name: 'new-agent' })
+      expect(api.post).toHaveBeenCalledWith('/agents', { name: 'new-agent' })
       expect(result.name).toBe('new-agent')
     })
   })
@@ -59,7 +59,7 @@ describe('agentsService', () => {
 
       await agentsService.delete('agent-123')
 
-      expect(api.delete).toHaveBeenCalledWith('/api/v1/agents/agent-123')
+      expect(api.delete).toHaveBeenCalledWith('/agents/agent-123')
     })
   })
 
@@ -70,7 +70,7 @@ describe('agentsService', () => {
 
       const result = await agentsService.update('agent-123', { name: 'renamed' })
 
-      expect(api.put).toHaveBeenCalledWith('/api/v1/agents/agent-123', { name: 'renamed' })
+      expect(api.put).toHaveBeenCalledWith('/agents/agent-123', { name: 'renamed' })
       expect(result.name).toBe('renamed')
     })
   })

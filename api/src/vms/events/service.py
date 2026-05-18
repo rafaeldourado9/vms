@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from datetime import datetime
 
 from redis.asyncio import Redis
 
@@ -10,6 +11,7 @@ from vms.infrastructure.config import get_settings
 from vms.infrastructure.messaging.event_bus import publish_event
 from vms.shared.exceptions import NotFoundError
 from vms.events.domain import AlprDetection, VmsEvent
+from vms.events.images import save_event_image
 from vms.events.repository import EventRepositoryPort
 
 logger = logging.getLogger(__name__)
@@ -34,10 +36,35 @@ class EventService:
         Retorna None se a detecção for duplicata dentro do TTL configurado.
         Publica 'alpr.detected' no event bus se aceita.
         """
-        dedup_key = f"{_DEDUP_KEY_PREFIX}:{detection.camera_id}:{detection.plate}"
         settings = get_settings()
-        ttl = settings.alpr_dedup_ttl_seconds
 
+        # Filtro de confiança mínima — evita poluir o histórico com leituras
+        # fracas de placa (OCR parcial, ângulo ruim, borrado).
+        if detection.confidence < settings.alpr_min_confidence:
+            logger.debug(
+                "ALPR abaixo do mínimo de confiança: placa=%s conf=%.2f min=%.2f",
+                detection.plate,
+                detection.confidence,
+                settings.alpr_min_confidence,
+            )
+            return None
+
+        # Chave 1 — dedup por timestamp exato (24h TTL): mesmo evento nunca salvo 2x
+        ts_bucket = detection.timestamp.strftime("%Y%m%d%H%M")
+        exact_key = f"{_DEDUP_KEY_PREFIX}:exact:{detection.camera_id}:{detection.plate}:{ts_bucket}"
+        is_new = await redis_client.set(exact_key, "1", ex=86400, nx=True)
+        if not is_new:
+            logger.debug(
+                "ALPR duplicata exata ignorada: placa=%s camera=%s ts=%s",
+                detection.plate,
+                detection.camera_id,
+                ts_bucket,
+            )
+            return None
+
+        # Chave 2 — dedup por janela TTL: mesma placa na mesma câmera dentro do TTL
+        dedup_key = f"{_DEDUP_KEY_PREFIX}:{detection.camera_id}:{detection.plate}"
+        ttl = settings.alpr_dedup_ttl_seconds
         is_new = await redis_client.set(dedup_key, "1", ex=ttl, nx=True)
         if not is_new:
             logger.debug(
@@ -47,10 +74,18 @@ class EventService:
             )
             return None
 
+        # Salva imagem em disco se disponível
+        image_path = save_event_image(
+            tenant_id=detection.tenant_id,
+            event_id=str(uuid.uuid4()),
+            image_b64=detection.image_b64,
+            occurred_at=detection.timestamp,
+        )
+
         event = VmsEvent(
             id=str(uuid.uuid4()),
             tenant_id=detection.tenant_id,
-            event_type="alpr.detected",
+            event_type="alpr_detected",
             payload={
                 "plate": detection.plate,
                 "confidence": detection.confidence,
@@ -62,6 +97,7 @@ class EventService:
             camera_id=detection.camera_id,
             plate=detection.plate,
             confidence=detection.confidence,
+            image_path=image_path,
             occurred_at=detection.timestamp,
         )
         saved = await self._events.create(event)
@@ -84,6 +120,9 @@ class EventService:
         event_type: str | None = None,
         plate: str | None = None,
         camera_id: str | None = None,
+        source: str | None = None,
+        occurred_after: datetime | None = None,
+        occurred_before: datetime | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> tuple[list[VmsEvent], int]:
@@ -93,6 +132,9 @@ class EventService:
             event_type=event_type,
             plate=plate,
             camera_id=camera_id,
+            source=source,
+            occurred_after=occurred_after,
+            occurred_before=occurred_before,
             limit=limit,
             offset=offset,
         )

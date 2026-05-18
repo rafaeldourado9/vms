@@ -2,10 +2,10 @@ import { useState } from 'react'
 import { NavLink, useNavigate } from 'react-router-dom'
 import {
   LayoutDashboard, Cctv, LayoutGrid, Film,
-  ShieldAlert, Bell, Users, Settings,
-  ChevronLeft, ChevronRight, LogOut, Scan, MapPin,
-  FileText, ClipboardList, ShieldCheck, HeartPulse, BarChart3,
-  Brain,
+  Bell, Users, Settings,
+  ChevronLeft, ChevronRight, LogOut, MapPin,
+  FileText, ClipboardList, BarChart3, Bot,
+  ScanLine, Activity,
 } from 'lucide-react'
 import { clsx } from 'clsx'
 import { useAuthStore } from '@/store/authStore'
@@ -34,14 +34,8 @@ const NAV_SECTIONS: NavSection[] = [
       { to: '/mosaic',         icon: LayoutGrid,      label: 'Mosaico' },
       { to: '/tactical',       icon: MapPin,          label: 'Visão Tática' },
       { to: '/recordings',     icon: Film,            label: 'Gravações' },
-      { to: '/events',         icon: ShieldAlert,     label: 'Eventos' },
-    ],
-  },
-  {
-    label: 'Inteligência',
-    items: [
-      { to: '/analytics-dashboard', icon: Brain,          label: 'Analytics Dashboard' },
-      { to: '/analytics',           icon: Scan,           label: 'Regiões (ROI)', adminOnly: true },
+      { to: '/detections',     icon: ScanLine,        label: 'Detecções ALPR' },
+      { to: '/events',         icon: Activity,        label: 'Eventos Analíticos' },
     ],
   },
   {
@@ -49,22 +43,25 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { to: '/reports',        icon: FileText,        label: 'Relatórios' },
       { to: '/audit',          icon: ClipboardList,   label: 'Auditoria' },
-      { to: '/billing',        icon: BarChart3,       label: 'Licenças' },
+      { to: '/billing',        icon: BarChart3,       label: 'Financeiro' },
       { to: '/notifications',  icon: Bell,            label: 'Notificações' },
+      { to: '/agents',         icon: Bot,             label: 'Agentes',       adminOnly: true },
       { to: '/users',          icon: Users,           label: 'Usuários',      adminOnly: true },
     ],
   },
   {
     label: 'Sistema',
     items: [
-      { to: '/lgpd',           icon: ShieldCheck,     label: 'LGPD' },
-      { to: '/health',         icon: HeartPulse,      label: 'Saúde' },
       { to: '/settings',       icon: Settings,        label: 'Configurações', adminOnly: true },
     ],
   },
 ]
 
-export function Sidebar() {
+interface SidebarProps {
+  onClose?: () => void
+}
+
+export function Sidebar({ onClose }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
   const { systemName, logoUrl } = useThemeStore()
   const { logout } = useAuthStore()
@@ -141,6 +138,7 @@ export function Sidebar() {
                   to={to}
                   end={to === '/dashboard'}
                   title={collapsed ? label : undefined}
+                  onClick={onClose}
                   className={({ isActive }) =>
                     clsx(
                       'flex items-center gap-3 rounded-lg px-2.5 py-2 text-sm font-medium transition-all duration-100',

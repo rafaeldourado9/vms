@@ -54,9 +54,11 @@ class Settings(BaseSettings):
 
     # ─── Gravações ────────────────────────────────────────────────────────
     recordings_path: str = Field(default="/recordings")
+    recordings_disk_quota_pct: float = Field(default=0.85, ge=0.5, le=0.99)
 
     # ─── ALPR ─────────────────────────────────────────────────────────────
     alpr_dedup_ttl_seconds: int = Field(default=60)
+    alpr_min_confidence: float = Field(default=0.80)
 
     # ─── Limites ──────────────────────────────────────────────────────────
     max_cameras: int = Field(default=200)

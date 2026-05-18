@@ -35,6 +35,12 @@ class TenantModel(Base):
     license_key_id: Mapped[str | None] = mapped_column(UUID(as_uuid=False), nullable=True)
     onboarding_complete: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
 
+    # White-label branding — aparece nos PDFs de relatório
+    company_name: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    cnpj: Mapped[str | None] = mapped_column(String(18), nullable=True)
+    company_address: Mapped[str | None] = mapped_column(String(500), nullable=True)
+    logo_url: Mapped[str | None] = mapped_column(String(1000), nullable=True)
+
 
     users: Mapped[list["UserModel"]] = relationship("UserModel", back_populates="tenant")
 

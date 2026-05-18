@@ -1,7 +1,10 @@
 """Tarefas ARQ para geração de relatórios."""
 from __future__ import annotations
 
+import asyncio
 import logging
+from contextlib import asynccontextmanager
+from typing import AsyncIterator
 
 from vms.reports.domain import ReportType
 from vms.reports.repository import ReportRepository
@@ -10,31 +13,73 @@ from vms.infrastructure.database import get_session_factory
 
 logger = logging.getLogger(__name__)
 
+_PDF_SEM_KEY = "arq:sem:pdf_generation"
+_PDF_SEM_LIMIT = 2   # máx PDFs gerados em paralelo — cada um pode usar 200–500 MB RAM
+_PDF_SEM_TTL = 660   # TTL Redis em segundos — auto-libera se worker crashar
+
+
+@asynccontextmanager
+async def _pdf_semaphore(redis, timeout: int = 60) -> AsyncIterator[None]:
+    """Semáforo distribuído via Redis INCR/DECR.
+
+    Bloqueia até conseguir slot ou lança TimeoutError após ``timeout`` segundos.
+    O TTL garante liberação automática mesmo em crash do worker.
+    """
+    loop = asyncio.get_event_loop()
+    start = loop.time()
+    while True:
+        count = await redis.incr(_PDF_SEM_KEY)
+        await redis.expire(_PDF_SEM_KEY, _PDF_SEM_TTL)
+        if count <= _PDF_SEM_LIMIT:
+            break
+        await redis.decr(_PDF_SEM_KEY)
+        if loop.time() - start > timeout:
+            raise TimeoutError(
+                f"PDF semaphore esgotado após {timeout}s — "
+                f"{_PDF_SEM_LIMIT} relatórios já em geração"
+            )
+        await asyncio.sleep(3)
+    try:
+        yield
+    finally:
+        await redis.decr(_PDF_SEM_KEY)
+
 
 async def task_generate_report(ctx: dict, report_id: str) -> None:
-    """Gera relatório PDF solicitado via ARQ."""
+    """Gera relatório PDF solicitado via ARQ.
+
+    Limitado a _PDF_SEM_LIMIT execuções paralelas para evitar spike de RAM.
+    """
+    redis = ctx.get("redis")
     factory = get_session_factory()
-    async with factory() as session:
-        try:
-            repo = ReportRepository(session)
-            svc = ReportService(repo)
 
-            report = await repo.get_by_id(report_id, tenant_id="*")  # Lookup global
-            if not report:
-                logger.warning("Relatório %s não encontrado para task", report_id)
-                return
+    sem = _pdf_semaphore(redis) if redis else _noop_ctx()
+    async with sem:
+        async with factory() as session:
+            try:
+                repo = ReportRepository(session)
+                svc = ReportService(repo)
 
-            # Coletar dados
-            data = await _collect_data_for_task(report, session)
+                report = await repo.get_by_id(report_id, tenant_id="*")
+                if not report:
+                    logger.warning("Relatório %s não encontrado para task", report_id)
+                    return
 
-            # Gerar PDF
-            await svc.generate_report_pdf(report, data)
+                data = await _collect_data_for_task(report, session)
+                branding = await _fetch_branding_for_task(report.tenant_id, session)
+                await svc.generate_report_pdf(report, data, branding=branding)
 
-            await session.commit()
-            logger.info("Relatório %s gerado com sucesso", report_id)
-        except Exception:
-            await session.rollback()
-            logger.exception("Falha ao gerar relatório %s", report_id)
+                await session.commit()
+                logger.info("Relatório %s gerado com sucesso", report_id)
+            except Exception:
+                await session.rollback()
+                logger.exception("Falha ao gerar relatório %s", report_id)
+
+
+@asynccontextmanager
+async def _noop_ctx() -> AsyncIterator[None]:
+    """Fallback quando Redis não está disponível no contexto."""
+    yield
 
 
 async def _collect_data_for_task(report, session) -> dict:
@@ -131,3 +176,61 @@ async def _collect_data_for_task(report, session) -> dict:
         return {"analytics_events": events, "summary": plugin_counts, "total_events": len(events)}
 
     return {"events": [], "summary": {}, "total_events": 0}
+
+
+async def task_auto_monthly_report(ctx: dict) -> None:
+    """Cron mensal: gera relatórios CAMERAS_STATUS + EVENTS_SUMMARY para todos os tenants ativos."""
+    from vms.infrastructure.database import get_session_factory
+    from vms.iam.models import TenantModel
+    from sqlalchemy import select
+
+    factory = get_session_factory()
+    async with factory() as session:
+        try:
+            tenants = (await session.execute(
+                select(TenantModel).where(
+                    TenantModel.is_active.is_(True),
+                    TenantModel.onboarding_complete.is_(True),
+                )
+            )).scalars().all()
+
+            for tenant in tenants:
+                tenant_id = str(tenant.id)
+                for rtype in (ReportType.CAMERAS_STATUS, ReportType.EVENTS_SUMMARY):
+                    try:
+                        repo = ReportRepository(session)
+                        svc = ReportService(repo)
+                        report = await svc.create_report(
+                            tenant_id=tenant_id,
+                            report_type=rtype,
+                            parameters={"period_days": 30, "auto": True},
+                        )
+                        data = await _collect_data_for_task(report, session)
+                        branding = await _fetch_branding_for_task(tenant_id, session)
+                        await svc.generate_report_pdf(report, data, branding=branding)
+                        await session.commit()
+                        logger.info(
+                            "Relatório mensal %s gerado para tenant %s", rtype, tenant_id
+                        )
+                    except Exception:
+                        await session.rollback()
+                        logger.exception(
+                            "Falha ao gerar relatório mensal %s para tenant %s", rtype, tenant_id
+                        )
+        except Exception:
+            logger.exception("Falha na task cron de relatórios mensais")
+
+
+async def _fetch_branding_for_task(tenant_id: str, session) -> dict:
+    """Busca dados de branding do tenant (contexto de task ARQ)."""
+    from sqlalchemy import select
+    from vms.iam.models import TenantModel
+    tenant = await session.scalar(select(TenantModel).where(TenantModel.id == tenant_id))
+    if not tenant:
+        return {}
+    return {
+        "company_name": getattr(tenant, 'company_name', None),
+        "cnpj": getattr(tenant, 'cnpj', None),
+        "company_address": getattr(tenant, 'company_address', None),
+        "logo_url": getattr(tenant, 'logo_url', None),
+    }

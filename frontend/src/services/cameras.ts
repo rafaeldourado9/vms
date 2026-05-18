@@ -14,6 +14,7 @@ interface CreateCameraData {
   latitude?: number
   longitude?: number
   ia_enabled?: boolean
+  ptz_supported?: boolean
   manufacturer?: string
   retention_days?: number
   stream_quality?: StreamQuality
@@ -85,8 +86,20 @@ export const camerasService = {
     return res.data
   },
 
-  async discover(data: { subnet: string }): Promise<unknown> {
-    const res = await api.post('/cameras/discover', data)
+  async discover(data: { subnet?: string }): Promise<DiscoverOnvifResponse> {
+    const res = await api.post<DiscoverOnvifResponse>('/cameras/discover', data)
     return res.data
   },
+}
+
+export interface DiscoveredCamera {
+  onvif_url: string
+  manufacturer: string | null
+  model: string | null
+  ip: string
+}
+
+export interface DiscoverOnvifResponse {
+  cameras: DiscoveredCamera[]
+  duration_ms: number
 }

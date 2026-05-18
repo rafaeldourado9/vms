@@ -12,7 +12,7 @@
                 color: #666;
             }
             @bottom-left {
-                content: "Gerado por vCloud VMS";
+                content: "{{ branding.company_name or 'VMS' }} — Confidencial";
                 font-size: 8pt;
                 color: #666;
             }
@@ -27,6 +27,16 @@
             border-bottom: 2px solid #2c3e50;
             padding-bottom: 10px;
             margin-bottom: 20px;
+            display: flex;
+            align-items: flex-start;
+            justify-content: space-between;
+        }
+        .header-left { flex: 1; }
+        .header-logo {
+            max-height: 50px;
+            max-width: 160px;
+            object-fit: contain;
+            margin-left: 20px;
         }
         .header h1 {
             font-size: 18pt;
@@ -78,11 +88,15 @@
         }
         .footer {
             margin-top: 40px;
-            text-align: center;
             font-size: 8pt;
             color: #999;
             border-top: 1px solid #eee;
             padding-top: 10px;
+        }
+        .footer-company {
+            font-size: 9pt;
+            color: #555;
+            margin-bottom: 4px;
         }
         .status-badge {
             display: inline-block;
@@ -110,14 +124,29 @@
 </head>
 <body>
     <div class="header">
-        <h1>{{ title }}</h1>
-        <p>Relatório Gerado Automaticamente em {{ generated_at }}</p>
+        <div class="header-left">
+            <h1>{{ title }}</h1>
+            <p>Gerado em {{ generated_at }}</p>
+            {% if branding.company_name %}
+            <p style="font-weight: bold; color: #2c3e50; margin-top: 3px;">{{ branding.company_name }}</p>
+            {% endif %}
+        </div>
+        {% if branding.logo_url %}
+        <img class="header-logo" src="{{ branding.logo_url }}" alt="Logo" />
+        {% endif %}
     </div>
 
     {% block content %}{% endblock %}
 
     <div class="footer">
-        <p>vCloud VMS — Video Management System | Documento confidencial</p>
+        {% if branding.company_name or branding.cnpj or branding.company_address %}
+        <div class="footer-company">
+            {% if branding.company_name %}<strong>{{ branding.company_name }}</strong>{% endif %}
+            {% if branding.cnpj %} &nbsp;|&nbsp; CNPJ: {{ branding.cnpj }}{% endif %}
+            {% if branding.company_address %}<br>{{ branding.company_address }}{% endif %}
+        </div>
+        {% endif %}
+        <p>Video Management System — Documento confidencial</p>
     </div>
 </body>
 </html>

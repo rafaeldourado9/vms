@@ -2,8 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, Outlet } from 'react-router-dom
 import { Toaster } from 'react-hot-toast'
 import { Layout } from '@/components/layout/Layout'
 import { useAuthStore } from '@/store/authStore'
-import { OnboardingWizard } from '@/components/wizard/OnboardingWizard'
-import { useOnboarding } from '@/hooks/useOnboarding'
+import { LicenseGate } from '@/components/license/LicenseGate'
 
 import { LoginPage }           from '@/pages/LoginPage'
 import { DashboardPage }       from '@/pages/DashboardPage'
@@ -11,19 +10,16 @@ import { CamerasPage }         from '@/pages/CamerasPage'
 import { CameraDetailPage }    from '@/pages/CameraDetailPage'
 import { MosaicPage }          from '@/pages/MosaicPage'
 import { RecordingsPage }      from '@/pages/RecordingsPage'
-import { EventsPage }          from '@/pages/EventsPage'
 import { NotificationsPage }   from '@/pages/NotificationsPage'
 import { UsersPage }           from '@/pages/UsersPage'
 import { SettingsPage }        from '@/pages/SettingsPage'
-import { ROIManagementPage }    from '@/pages/ROIManagementPage'
 import { TacticalViewPage }    from '@/pages/TacticalViewPage'
 import { ReportsPage }         from '@/pages/ReportsPage'
 import { AuditPage }           from '@/pages/AuditPage'
 import { BillingPage }         from '@/pages/BillingPage'
-import { LGPDPage }            from '@/pages/LGPDPage'
-import { SystemHealthPage }    from '@/pages/SystemHealthPage'
-import { AnalyticsDashboardPage } from '@/pages/AnalyticsDashboardPage'
 import { AgentsPage }          from '@/pages/AgentsPage'
+import { DetectionsPage }      from '@/pages/DetectionsPage'
+import { AnalyticsEventsPage } from '@/pages/AnalyticsEventsPage'
 
 // ─── Proteções de segurança no frontend ───────────────────────────────────────
 
@@ -49,13 +45,8 @@ function RequireAuth() {
 }
 
 function AuthenticatedApp() {
-  const { complete, markComplete } = useOnboarding()
-
-  if (!complete) {
-    return <OnboardingWizard onComplete={markComplete} />
-  }
-
   return (
+    <LicenseGate>
     <Routes>
       <Route element={<Layout />}>
         <Route index element={<Navigate to="/dashboard" replace />} />
@@ -65,21 +56,19 @@ function AuthenticatedApp() {
         <Route path="/mosaic"        element={<MosaicPage />} />
         <Route path="/tactical"      element={<TacticalViewPage />} />
         <Route path="/recordings"    element={<RecordingsPage />} />
-        <Route path="/events"        element={<EventsPage />} />
+        <Route path="/detections"    element={<DetectionsPage />} />
+        <Route path="/events"        element={<AnalyticsEventsPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
-        <Route path="/analytics"     element={<ROIManagementPage />} />
-        <Route path="/analytics-dashboard" element={<AnalyticsDashboardPage />} />
         <Route path="/agents"        element={<AgentsPage />} />
         <Route path="/reports"       element={<ReportsPage />} />
         <Route path="/audit"         element={<AuditPage />} />
         <Route path="/billing"       element={<BillingPage />} />
-        <Route path="/lgpd"          element={<LGPDPage />} />
-        <Route path="/health"        element={<SystemHealthPage />} />
         <Route path="/users"         element={<UsersPage />} />
         <Route path="/settings"      element={<SettingsPage />} />
         <Route path="*"              element={<Navigate to="/dashboard" replace />} />
       </Route>
     </Routes>
+    </LicenseGate>
   )
 }
 

@@ -70,6 +70,17 @@ class BusinessRuleViolation(DomainError):
     pass
 
 
+class AuthenticationError(DomainError):
+    """
+    Falha de autenticação (credenciais inválidas ou token expirado).
+
+    Uso:
+        if not verify_password(password, hash):
+            raise AuthenticationError("Credenciais inválidas")
+    """
+    pass
+
+
 class UnauthorizedError(DomainError):
     """
     Ação não autorizada (permissão insuficiente).
@@ -104,14 +115,19 @@ class IntegrityError(DomainError):
     pass
 
 
-class DuplicateError(DomainError):
+class ConflictError(DomainError):
     """
-    Entidade duplicada (ex: câmera com mesmo nome no tenant).
+    Conflito de recurso (ex: slug/email já em uso no tenant).
 
     Uso:
-        if existing_camera:
-            raise DuplicateError(f"Já existe câmera com nome '{name}' neste tenant")
+        if existing:
+            raise ConflictError(f"Slug '{slug}' já está em uso")
     """
+    pass
+
+
+class DuplicateError(ConflictError):
+    """Alias semântico de ConflictError para compatibilidade."""
     pass
 
 

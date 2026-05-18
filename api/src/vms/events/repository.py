@@ -10,6 +10,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from vms.events.domain import VmsEvent
 from vms.events.models import VmsEventModel
 
+# Tipos de evento que chegam via webhook de câmera (Fluxo A)
+_LPR_TYPES = ["alpr_detected", "intelbras_event", "hikvision_motion", "camera_event"]
+
 
 # ─── Port (interface) ─────────────────────────────────────────────────────────
 
@@ -24,6 +27,9 @@ class EventRepositoryPort(Protocol):
         event_type: str | None = None,
         plate: str | None = None,
         camera_id: str | None = None,
+        source: str | None = None,
+        occurred_after: datetime | None = None,
+        occurred_before: datetime | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> tuple[list[VmsEvent], int]: ...
@@ -43,6 +49,7 @@ def _event_to_domain(m: VmsEventModel) -> VmsEvent:
         camera_id=m.camera_id,
         plate=m.plate,
         confidence=m.confidence,
+        image_path=m.image_path,
         occurred_at=m.occurred_at,
     )
 
@@ -65,6 +72,7 @@ class EventRepository:
             camera_id=event.camera_id,
             plate=event.plate,
             confidence=event.confidence,
+            image_path=event.image_path,
             occurred_at=event.occurred_at,
         )
         self._session.add(model)
@@ -78,6 +86,9 @@ class EventRepository:
         event_type: str | None = None,
         plate: str | None = None,
         camera_id: str | None = None,
+        source: str | None = None,
+        occurred_after: datetime | None = None,
+        occurred_before: datetime | None = None,
         limit: int = 20,
         offset: int = 0,
     ) -> tuple[list[VmsEvent], int]:
@@ -89,6 +100,14 @@ class EventRepository:
             base = base.where(VmsEventModel.plate == plate.upper())
         if camera_id:
             base = base.where(VmsEventModel.camera_id == camera_id)
+        if source == "lpr":
+            base = base.where(VmsEventModel.event_type.in_(_LPR_TYPES))
+        elif source == "analytics":
+            base = base.where(VmsEventModel.event_type.notin_(_LPR_TYPES))
+        if occurred_after:
+            base = base.where(VmsEventModel.occurred_at >= occurred_after)
+        if occurred_before:
+            base = base.where(VmsEventModel.occurred_at <= occurred_before)
 
         count_stmt = select(func.count()).select_from(base.subquery())
         total = await self._session.scalar(count_stmt) or 0

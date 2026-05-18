@@ -26,21 +26,21 @@ export interface CameraConfigItem {
 
 export const agentsService = {
   async list(): Promise<Agent[]> {
-    const { data } = await api.get('/api/v1/agents')
+    const { data } = await api.get('/agents')
     return data
   },
 
   async create(name: string): Promise<Agent> {
-    const { data } = await api.post('/api/v1/agents', { name })
+    const { data } = await api.post('/agents', { name })
     return data
   },
 
   async delete(id: string): Promise<void> {
-    await api.delete(`/api/v1/agents/${id}`)
+    await api.delete(`/agents/${id}`)
   },
 
   async update(id: string, updates: { name?: string; is_active?: boolean }): Promise<Agent> {
-    const { data } = await api.put(`/api/v1/agents/${id}`, updates)
+    const { data } = await api.put(`/agents/${id}`, updates)
     return data
   },
 }

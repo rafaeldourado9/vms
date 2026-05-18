@@ -12,8 +12,11 @@ from vms.iam.schemas import (
     CreateUserRequest,
     LoginRequest,
     RefreshRequest,
+    TenantBrandingRequest,
+    TenantBrandingResponse,
     TenantResponse,
     TokenResponse,
+    UpdateUserRequest,
     UserResponse,
 )
 from vms.iam.service import ApiKeyService, AuthService, TenantService, UserService
@@ -122,6 +125,66 @@ async def create_tenant(
 # ─── Usuários ─────────────────────────────────────────────────────────────────
 
 @router.get(
+    "/iam/branding",
+    response_model=TenantBrandingResponse,
+    summary="Dados de branding do tenant",
+    tags=["tenants"],
+)
+async def get_branding(claims: CurrentUser, db: DbSession) -> TenantBrandingResponse:
+    """Retorna dados de identidade visual do tenant (usados nos PDFs)."""
+    from sqlalchemy import select
+    from vms.iam.models import TenantModel
+    tenant = await db.scalar(select(TenantModel).where(TenantModel.id == claims.tenant_id))
+    if not tenant:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Tenant não encontrado")
+    return TenantBrandingResponse(
+        company_name=tenant.company_name,
+        cnpj=tenant.cnpj,
+        company_address=tenant.company_address,
+        logo_url=tenant.logo_url,
+    )
+
+
+@router.patch(
+    "/iam/branding",
+    response_model=TenantBrandingResponse,
+    summary="Atualizar dados de branding do tenant",
+    tags=["tenants"],
+)
+async def update_branding(
+    body: TenantBrandingRequest,
+    claims: CurrentUser,
+    db: DbSession,
+) -> TenantBrandingResponse:
+    """Atualiza dados de identidade visual para PDFs de relatório."""
+    from sqlalchemy import select
+    from vms.iam.models import TenantModel
+    tenant = await db.scalar(select(TenantModel).where(TenantModel.id == claims.tenant_id))
+    if not tenant:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=404, detail="Tenant não encontrado")
+
+    if body.company_name is not None:
+        tenant.company_name = body.company_name
+    if body.cnpj is not None:
+        tenant.cnpj = body.cnpj
+    if body.company_address is not None:
+        tenant.company_address = body.company_address
+    if body.logo_url is not None:
+        tenant.logo_url = body.logo_url
+
+    await db.commit()
+    await db.refresh(tenant)
+    return TenantBrandingResponse(
+        company_name=tenant.company_name,
+        cnpj=tenant.cnpj,
+        company_address=tenant.company_address,
+        logo_url=tenant.logo_url,
+    )
+
+
+@router.get(
     "/users",
     response_model=list[UserResponse],
     summary="Listar usuários do tenant",
@@ -217,6 +280,39 @@ async def create_user(
         password=body.password,
         full_name=body.full_name,
         role=UserRole(body.role),
+    )
+    return UserResponse(
+        id=user.id,
+        tenant_id=user.tenant_id,
+        email=user.email,
+        full_name=user.full_name,
+        role=user.role,
+        is_active=user.is_active,
+        created_at=user.created_at,
+    )
+
+
+@router.patch(
+    "/users/{user_id}",
+    response_model=UserResponse,
+    summary="Atualizar usuário",
+    tags=["users"],
+)
+async def update_user(
+    user_id: str,
+    body: UpdateUserRequest,
+    claims: AdminUser,
+    db: DbSession,
+) -> UserResponse:
+    """Atualiza role, status ativo ou senha de um usuário. Admin only."""
+    from vms.iam.domain import UserRole
+    svc = _make_user_service(db)
+    user = await svc.update_user(
+        user_id=user_id,
+        tenant_id=claims.tenant_id,
+        role=UserRole(body.role) if body.role else None,
+        is_active=body.is_active,
+        password=body.password,
     )
     return UserResponse(
         id=user.id,

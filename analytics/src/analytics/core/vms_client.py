@@ -104,6 +104,7 @@ class VMSClient:
         payload: dict[str, Any],
         confidence: float | None = None,
         occurred_at: str | None = None,
+        snapshot_path: str | None = None,
     ) -> bool:
         """
         Envia evento detectado pelo plugin via POST /api/v1/plugins/events.
@@ -122,6 +123,8 @@ class VMSClient:
             body["confidence"] = confidence
         if occurred_at is not None:
             body["occurred_at"] = occurred_at
+        if snapshot_path is not None:
+            body["snapshot_path"] = snapshot_path
 
         try:
             resp = await self._client.post("/api/v1/plugins/events", json=body)

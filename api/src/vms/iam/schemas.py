@@ -56,6 +56,26 @@ class TenantResponse(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class TenantBrandingRequest(BaseModel):
+    """Dados de identidade visual do integrador para PDFs."""
+
+    company_name: str | None = Field(default=None, max_length=255)
+    cnpj: str | None = Field(default=None, max_length=18)
+    company_address: str | None = Field(default=None, max_length=500)
+    logo_url: str | None = Field(default=None, max_length=1000)
+
+
+class TenantBrandingResponse(BaseModel):
+    """Dados de branding do tenant."""
+
+    company_name: str | None = None
+    cnpj: str | None = None
+    company_address: str | None = None
+    logo_url: str | None = None
+
+    model_config = {"from_attributes": True}
+
+
 # ─── User ─────────────────────────────────────────────────────────────────────
 
 class CreateUserRequest(BaseModel):
@@ -79,6 +99,14 @@ class UserResponse(BaseModel):
     created_at: datetime
 
     model_config = {"from_attributes": True}
+
+
+class UpdateUserRequest(BaseModel):
+    """Campos atualizáveis de um usuário — todos opcionais."""
+
+    role: str | None = Field(default=None, pattern=r"^(admin|operator|viewer)$")
+    is_active: bool | None = None
+    password: str | None = Field(default=None, min_length=8)
 
 
 # ─── API Key ──────────────────────────────────────────────────────────────────
